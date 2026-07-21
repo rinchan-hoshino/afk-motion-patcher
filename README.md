@@ -8,10 +8,10 @@ The source Avatar and its Action Controller are authoritative. The plugin extrac
 
 ## Installation
 
-1. Open the [AFK Motion Patcher product page](https://k-neco.com/products/afk-motion-patcher) and choose **Add to VCC**.
+1. [Add the repository to VCC](vcc://vpm/addRepo?url=https%3A%2F%2Fvpm.k-neco.com%2Findex.json).
 2. In VCC, open **Manage Project** and add **AFK Motion Patcher**.
 
-If the VCC link does not open, add `https://k-neco.com/vpm/vpm.json` under **Settings > Packages > Add Repository**.
+If the VCC link does not open, add `https://vpm.k-neco.com/index.json` under **Settings > Packages > Add Repository**.
 
 ## Features
 
