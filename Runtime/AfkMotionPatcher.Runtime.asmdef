@@ -1,0 +1,14 @@
+{
+  "name": "THE_cattail.AfkMotionPatcher.Runtime",
+  "rootNamespace": "THE_cattail.AfkMotionPatcher",
+  "references": [],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

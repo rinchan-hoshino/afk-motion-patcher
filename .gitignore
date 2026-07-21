@@ -1,0 +1,9 @@
+.DS_Store
+Thumbs.db
+*.csproj
+*.sln
+*.user
+*.tmp
+*.bak
+*.rinbak*
+_rin_reports/

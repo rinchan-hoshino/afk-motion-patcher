@@ -1,0 +1,25 @@
+{
+  "name": "THE_cattail.AfkMotionPatcher.Editor",
+  "rootNamespace": "THE_cattail.AfkMotionPatcher",
+  "references": [
+    "THE_cattail.AfkMotionPatcher.Runtime",
+    "nadena.dev.ndmf",
+    "nadena.dev.ndmf.runtime",
+    "VRC.SDK3A",
+    "VRC.SDKBase"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [
+    "System.Collections.Immutable.dll",
+    "VRC.SDK3.Dynamics.PhysBone.dll"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

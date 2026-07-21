@@ -1,0 +1,11 @@
+* text=auto
+.gitattributes text eol=lf
+.gitignore text eol=lf
+*.cs text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.meta text eol=lf -whitespace
+*.prefab text eol=lf -whitespace
+*.unity text eol=lf -whitespace
+*.anim text eol=lf -whitespace
+*.controller text eol=lf -whitespace
