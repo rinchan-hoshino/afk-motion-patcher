@@ -2,6 +2,12 @@
 
 All notable changes to AFK Motion Patcher are documented in this file.
 
+## [1.0.1] - 2026-07-27
+
+### Fixed
+
+- Result Preview now processes an isolated target copy through NDMF, so Modular Avatar Bone Proxy and Merge Armature attachments follow the sampled target pose without modifying the source avatar or recursively processing AFK Motion Patcher.
+
 ## [1.0.0] - 2026-07-20
 
 ### Added

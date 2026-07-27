@@ -351,8 +351,8 @@ namespace THE_cattail.AfkMotionPatcher
 
         private void RebuildPreviewObjects()
         {
-            _sourcePane.SetContent(_sourcePreviewRoot, _sourceClip, _sourceClips, _forcePaneContentRefresh);
-            _targetPane.SetContent(_targetPreviewRoot, _previewClip, _previewClips, _forcePaneContentRefresh);
+            _sourcePane.SetContent(_sourcePreviewRoot, false, _sourceClip, _sourceClips, _forcePaneContentRefresh);
+            _targetPane.SetContent(_targetPreviewRoot, true, _previewClip, _previewClips, _forcePaneContentRefresh);
             _forcePaneContentRefresh = false;
             Repaint();
         }
@@ -483,6 +483,29 @@ namespace THE_cattail.AfkMotionPatcher
             _time = Mathf.Clamp(_time + delta, 0f, maxTime);
         }
 
+        private static void ProcessResultPreviewClone(GameObject instance)
+        {
+            UnpackPreviewPrefabInstances(instance);
+            foreach (var patch in instance.GetComponentsInChildren<AfkMotionPatch>(true))
+                UnityEngine.Object.DestroyImmediate(patch);
+            using (new nadena.dev.ndmf.OverrideTemporaryDirectoryScope(null))
+                nadena.dev.ndmf.AvatarProcessor.ProcessAvatar(instance);
+        }
+
+        private static void UnpackPreviewPrefabInstances(GameObject instance)
+        {
+            while (true)
+            {
+                var prefabInstanceRoot = instance.GetComponentsInChildren<Transform>(true)
+                    .Select(transform => PrefabUtility.GetOutermostPrefabInstanceRoot(transform.gameObject))
+                    .FirstOrDefault(root => root
+                        && (root == instance || root.transform.IsChildOf(instance.transform)));
+                if (!prefabInstanceRoot) return;
+                PrefabUtility.UnpackPrefabInstance(
+                    prefabInstanceRoot, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            }
+        }
+
         private sealed class PreviewPane : IDisposable
         {
             private enum ViewTool { None, Pan, Zoom, Orbit }
@@ -490,6 +513,7 @@ namespace THE_cattail.AfkMotionPatcher
             private readonly string _label;
             private PreviewRenderUtility _preview;
             private GameObject _sourceRoot;
+            private bool _processAvatar;
             private AnimationClip _clip;
             private IReadOnlyList<AnimationClip> _resetSources = Array.Empty<AnimationClip>();
             private AnimationClip _resetClip;
@@ -523,11 +547,11 @@ namespace THE_cattail.AfkMotionPatcher
                 }
             }
 
-            public void SetContent(GameObject root, AnimationClip clip,
+            public void SetContent(GameObject root, bool processAvatar, AnimationClip clip,
                 IReadOnlyList<AnimationClip> resetSources = null, bool forceRebuild = false)
             {
                 resetSources = resetSources ?? _resetSources;
-                if (!forceRebuild && _sourceRoot == root)
+                if (!forceRebuild && _sourceRoot == root && _processAvatar == processAvatar)
                 {
                     if (!ReferenceEquals(_resetSources, resetSources))
                     {
@@ -539,6 +563,7 @@ namespace THE_cattail.AfkMotionPatcher
                 }
                 var preserveCamera = _hasCameraView && _sourceRoot == root;
                 _sourceRoot = root;
+                _processAvatar = processAvatar;
                 _clip = clip;
                 DestroyInstance();
                 _needsFit = !preserveCamera;
@@ -551,15 +576,24 @@ namespace THE_cattail.AfkMotionPatcher
                 _instance.name = _sourceRoot.name + " (AFK Preview)";
                 _instance.hideFlags = HideFlags.HideAndDontSave;
                 _instance.SetActive(true);
-                _preview.AddSingleGO(_instance);
-                RebuildResetClip(resetSources);
+                try
+                {
+                    if (_processAvatar) ProcessResultPreviewClone(_instance);
+                    _preview.AddSingleGO(_instance);
+                    RebuildResetClip(resetSources);
+                }
+                catch
+                {
+                    DestroyInstance();
+                    throw;
+                }
             }
 
             public void Draw(Rect rect, GameObject root, AnimationClip clip, float time, bool interactive,
                 AnimationClip nextClip = null, float nextTime = 0f,
                 float transitionDuration = 0f, float transitionProgress = 0f)
             {
-                SetContent(root, clip);
+                SetContent(root, _processAvatar, clip);
                 GUI.Box(rect, GUIContent.none);
                 var title = new Rect(rect.x + 4f, rect.y + 2f, rect.width - 8f, PaneToolbarHeight);
                 GUI.Label(title, T(_label), EditorStyles.whiteMiniLabel);
