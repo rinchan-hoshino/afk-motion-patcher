@@ -26,6 +26,7 @@ namespace THE_cattail.AfkMotionPatcher
                 .WithRequiredExtension(typeof(AnimatorServicesContext), sequence =>
                 {
                     sequence.Run(AfkMotionPatchPass.Instance);
+                    sequence.Run(AfkMotionPatchCleanupPass.Instance);
                 });
         }
     }
@@ -405,5 +406,18 @@ namespace THE_cattail.AfkMotionPatcher
             }
         }
     }
+
+    [RunsOnPlatforms(WellKnownPlatforms.VRChatAvatar30)]
+    internal sealed class AfkMotionPatchCleanupPass : Pass<AfkMotionPatchCleanupPass>
+    {
+        protected override void Execute(nadena.dev.ndmf.BuildContext context)
+        {
+            foreach (var patch in context.AvatarRootObject.GetComponentsInChildren<AfkMotionPatch>(true))
+            {
+                if (patch != null) UnityEngine.Object.DestroyImmediate(patch);
+            }
+        }
+    }
+
 }
 #endif
