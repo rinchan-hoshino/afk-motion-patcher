@@ -1,7 +1,9 @@
 {
   "name": "THE_cattail.AfkMotionPatcher.Runtime",
   "rootNamespace": "THE_cattail.AfkMotionPatcher",
-  "references": [],
+  "references": [
+    "nadena.dev.ndmf.runtime"
+  ],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,

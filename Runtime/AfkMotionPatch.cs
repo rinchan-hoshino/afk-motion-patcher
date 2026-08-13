@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Generic;
+using nadena.dev.ndmf;
 using UnityEngine;
 
 namespace THE_cattail.AfkMotionPatcher
 {
     [DisallowMultipleComponent]
     [AddComponentMenu("THE_cattail/AFK Motion Patch")]
-    public sealed class AfkMotionPatch : MonoBehaviour
+    public sealed class AfkMotionPatch : MonoBehaviour, INDMFEditorOnly
     {
         public enum SourceBindingComponent
         {

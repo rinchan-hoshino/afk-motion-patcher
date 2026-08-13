@@ -1,0 +1,24 @@
+{
+  "name": "THE_cattail.AfkMotionPatcher.EditorTests",
+  "rootNamespace": "THE_cattail.AfkMotionPatcher.Tests",
+  "references": [
+    "THE_cattail.AfkMotionPatcher.Runtime",
+    "VRC.SDK3A",
+    "VRC.SDKBase",
+    "nadena.dev.ndmf.runtime"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}

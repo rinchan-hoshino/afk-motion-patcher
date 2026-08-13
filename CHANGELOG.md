@@ -2,7 +2,7 @@
 
 All notable changes to AFK Motion Patcher are documented in this file.
 
-## [1.0.0] - 2026-08-03
+## [1.0.0] - 2026-08-13
 
 ### Added
 
@@ -15,3 +15,5 @@ All notable changes to AFK Motion Patcher are documented in this file.
 ### Fixed
 
 - Result Preview processes an isolated target copy through NDMF, so Modular Avatar Bone Proxy and Merge Armature attachments follow the sampled target pose without modifying the source avatar or recursively processing AFK Motion Patcher.
+- VRChat SDK validation recognizes the patch as an editor-only authoring component, preserving it until NDMF processing.
+- Processed avatars do not retain the patch authoring component.
