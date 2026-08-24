@@ -92,6 +92,13 @@ namespace THE_cattail.AfkMotionPatcher
                     var virtualState = controllerContext.Clone(sourceState);
                     if (virtualState != null)
                     {
+                        if (sourceState == layerGraph.NeutralState)
+                        {
+                            virtualState.Motion = null;
+                            virtualState.Behaviours = ImmutableList<StateMachineBehaviour>.Empty;
+                            continue;
+                        }
+
                         try
                         {
                             virtualState.Motion = AfkMotionPatchEditorUtil.CloneSourceMotion(
@@ -130,7 +137,7 @@ namespace THE_cattail.AfkMotionPatcher
                     .Select(transition => CloneTransition(controllerContext, transition))
                     .Where(transition => transition != null)
                     .ToHashSet();
-                var virtualEntry = controllerContext.Clone(layerGraph.EntryState);
+                var virtualEntry = controllerContext.Clone(layerGraph.NeutralState);
                 PruneLayer(layer, selectedVirtualStates, selectedVirtualTransitions, virtualEntry);
                 selectedStateCount += selectedVirtualStates.Count;
             }

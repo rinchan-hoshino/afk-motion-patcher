@@ -17,7 +17,8 @@ namespace THE_cattail.AfkMotionPatcher
         {
             public int LayerIndex;
             public AnimatorControllerLayer Layer;
-            public AnimatorState EntryState;
+            public AnimatorState NeutralState;
+            public AnimatorState AfkEntryState;
             public readonly HashSet<AnimatorState> States = new HashSet<AnimatorState>();
             public readonly List<AnimatorState> OrderedStates = new List<AnimatorState>();
             public readonly Dictionary<AnimatorState, string> StatePaths = new Dictionary<AnimatorState, string>();
@@ -425,23 +426,38 @@ namespace THE_cattail.AfkMotionPatcher
                 error = $"Nested source AFK entry states are not supported: {entryStatePath}";
                 return null;
             }
-            var entryState = selectedEntryState;
-
-            var records = EnumerateTransitions(layer.stateMachine).ToList();
-            var entryRecords = records.Where(record => HasAfkTrueCondition(record.Transition)).ToList();
-            var isAfkEntry = entryRecords
-                .SelectMany(record => ResolveTransitionPaths(record.Transition, record.Owner, topology))
-                .Any(path => path.Destination == entryState);
-            if (!isAfkEntry)
+            var afkEntryState = selectedEntryState;
+            var neutralEntryState = layer.stateMachine.defaultState;
+            if (!neutralEntryState)
             {
-                error = $"Selected Source AFK Entry State is not entered by an '{AfkParameterName}'-true transition: {entryStatePath}";
+                error = $"Source Controller layer has no neutral default state: {layer.name}";
                 return null;
             }
 
-            var layerGraph = new LayerGraph { Layer = layer, LayerIndex = layerIndex, EntryState = entryState };
+            var records = EnumerateTransitions(layer.stateMachine).ToList();
+            var entryRecords = records.Where(record => HasAfkTrueCondition(record.Transition)).ToList();
+            var neutralEntryRecords = entryRecords.Where(record =>
+                    (record.Source == neutralEntryState || record.Source == null)
+                    && ResolveTransitionPaths(record.Transition, record.Owner, topology)
+                        .Any(path => path.Destination == afkEntryState))
+                .ToList();
+            if (neutralEntryRecords.Count == 0)
+            {
+                error = $"Selected Source AFK Entry State must be reached from the neutral default state "
+                    + $"through an '{AfkParameterName}'-true transition: {entryStatePath}";
+                return null;
+            }
+
+            var layerGraph = new LayerGraph
+            {
+                Layer = layer,
+                LayerIndex = layerIndex,
+                NeutralState = neutralEntryState,
+                AfkEntryState = afkEntryState
+            };
             foreach (var pair in statePaths) layerGraph.StatePaths[pair.Key] = pair.Value;
             var queue = new Queue<TraversalItem>();
-            queue.Enqueue(new TraversalItem { State = layerGraph.EntryState, PostExit = false });
+            queue.Enqueue(new TraversalItem { State = layerGraph.AfkEntryState, PostExit = false });
 
             var visited = new HashSet<TraversalItem>();
             var contextMasks = new Dictionary<AnimatorState, int>();
@@ -478,6 +494,15 @@ namespace THE_cattail.AfkMotionPatcher
             {
                 error = $"Source AFK state is reachable both before and after the AFK exit boundary: {layerGraph.StatePaths[overlappingState]}";
                 return null;
+            }
+
+            if (layerGraph.States.Add(neutralEntryState)) layerGraph.OrderedStates.Insert(0, neutralEntryState);
+            foreach (var record in neutralEntryRecords)
+            {
+                foreach (var path in ResolveTransitionPaths(record.Transition, record.Owner, topology)
+                             .Where(path => path.Destination == afkEntryState))
+                    AddEdge(layerGraph, neutralEntryState,
+                        record.Transition as AnimatorStateTransition, path);
             }
 
             foreach (var stateMachine in EnumerateStateMachines(layer.stateMachine))
@@ -667,10 +692,10 @@ namespace THE_cattail.AfkMotionPatcher
         private void BuildPreviewRoute()
         {
             var layer = _layers.FirstOrDefault();
-            if (layer == null || !layer.EntryState) return;
+            if (layer == null || !layer.AfkEntryState) return;
 
             var defaults = Controller.parameters.ToDictionary(parameter => parameter.name, ParameterDefaultValue);
-            var current = layer.EntryState;
+            var current = layer.AfkEntryState;
             var afk = true;
             var switchedToExit = false;
             var guard = 0;

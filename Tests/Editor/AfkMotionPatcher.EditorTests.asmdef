@@ -3,6 +3,7 @@
   "rootNamespace": "THE_cattail.AfkMotionPatcher.Tests",
   "references": [
     "THE_cattail.AfkMotionPatcher.Runtime",
+    "THE_cattail.AfkMotionPatcher.Editor",
     "VRC.SDK3A",
     "VRC.SDKBase",
     "nadena.dev.ndmf.runtime"
