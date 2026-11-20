@@ -153,14 +153,15 @@ namespace THE_cattail.AfkMotionPatcher
                     return false;
                 }
             }
-            var eventClip = EffectiveSourceClips(patch)
-                .FirstOrDefault(clip => AnimationUtility.GetAnimationEvents(clip).Length > 0);
-            if (eventClip)
-            {
-                error = $"Animation Events are not supported in source AFK Motions: {eventClip.name}";
-                return false;
-            }
             return true;
+        }
+
+        public IReadOnlyList<AnimationClip> GetClipsWithAnimationEvents(AfkMotionPatch patch)
+        {
+            return EffectiveSourceClips(patch)
+                .Where(clip => clip && AnimationUtility.GetAnimationEvents(clip).Length > 0)
+                .Distinct()
+                .ToArray();
         }
 
 

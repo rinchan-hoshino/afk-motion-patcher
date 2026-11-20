@@ -6,6 +6,7 @@
     "THE_cattail.AfkMotionPatcher.Editor",
     "VRC.SDK3A",
     "VRC.SDKBase",
+    "nadena.dev.ndmf",
     "nadena.dev.ndmf.runtime"
   ],
   "includePlatforms": [
@@ -13,10 +14,17 @@
   ],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
-  "overrideReferences": false,
-  "precompiledReferences": [],
-  "autoReferenced": true,
-  "defineConstraints": [],
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "nunit.framework.dll",
+    "VRCSDK3A.dll",
+    "VRCSDKBase.dll",
+    "System.Collections.Immutable.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS"
+  ],
   "versionDefines": [],
   "noEngineReferences": false,
   "optionalUnityReferences": [

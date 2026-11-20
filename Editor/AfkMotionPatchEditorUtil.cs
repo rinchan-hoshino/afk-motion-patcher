@@ -46,22 +46,46 @@ namespace THE_cattail.AfkMotionPatcher
 
         public static VirtualMotion CloneSourceMotion(Motion source, IDictionary<Motion, VirtualMotion> memo)
         {
+            return CloneSourceMotion(source, memo, null, true);
+        }
+
+        public static VirtualMotion CloneSourceMotion(Motion source, IDictionary<Motion, VirtualMotion> memo,
+            CloneContext cloneContext, bool stripAnimationEvents)
+        {
             if (!source) return null;
             if (memo.TryGetValue(source, out var existing)) return existing;
 
             if (source is AnimationClip sourceClip)
             {
-                if (AnimationUtility.GetAnimationEvents(sourceClip).Length > 0)
-                    throw new NotSupportedException($"Animation Events are not supported in source AFK Motions: {sourceClip.name}");
-                var clip = VirtualClip.Create(sourceClip.name);
+                var hasEvents = AnimationUtility.GetAnimationEvents(sourceClip).Length > 0;
+                VirtualClip clip;
+                if (!stripAnimationEvents && hasEvents && cloneContext != null)
+                {
+                    clip = VirtualClip.Clone(cloneContext, sourceClip);
+                    memo[source] = clip;
+                    if (clip.AdditiveReferencePoseClip != null)
+                    {
+                        var settings = AnimationUtility.GetAnimationClipSettings(sourceClip);
+                        if (settings.additiveReferencePoseClip)
+                        {
+                            clip.AdditiveReferencePoseClip = CloneSourceMotion(
+                                settings.additiveReferencePoseClip, memo, cloneContext, stripAnimationEvents);
+                            clip.AdditiveReferencePoseTime = settings.additiveReferencePoseTime;
+                        }
+                    }
+                    return clip;
+                }
+
+                clip = VirtualClip.Create(sourceClip.name);
                 memo[source] = clip;
-                var settings = AnimationUtility.GetAnimationClipSettings(sourceClip);
-                var additiveReference = settings.additiveReferencePoseClip;
+                var clipSettings = AnimationUtility.GetAnimationClipSettings(sourceClip);
+                var additiveReference = clipSettings.additiveReferencePoseClip;
                 CopyClipSettings(sourceClip, clip);
                 if (additiveReference)
                 {
-                    clip.AdditiveReferencePoseClip = CloneSourceMotion(additiveReference, memo);
-                    clip.AdditiveReferencePoseTime = settings.additiveReferencePoseTime;
+                    clip.AdditiveReferencePoseClip = CloneSourceMotion(
+                        additiveReference, memo, cloneContext, stripAnimationEvents);
+                    clip.AdditiveReferencePoseTime = clipSettings.additiveReferencePoseTime;
                 }
                 foreach (var binding in AnimationUtility.GetCurveBindings(sourceClip))
                     clip.SetFloatCurve(binding, AnimationUtility.GetEditorCurve(sourceClip, binding));
@@ -84,7 +108,7 @@ namespace THE_cattail.AfkMotionPatcher
                     tree.NormalizedBlendValues = serializedTree.FindProperty("m_NormalizedBlendValues").boolValue;
                 tree.Children = sourceTree.children.Select(child => new VirtualBlendTree.VirtualChildMotion
                 {
-                    Motion = CloneSourceMotion(child.motion, memo),
+                    Motion = CloneSourceMotion(child.motion, memo, cloneContext, stripAnimationEvents),
                     CycleOffset = child.cycleOffset,
                     DirectBlendParameter = child.directBlendParameter,
                     Mirror = child.mirror,
@@ -105,8 +129,6 @@ namespace THE_cattail.AfkMotionPatcher
             appendedMappedCurveCount = 0;
             if (clip == null || avatarRoot == null || patch == null) return;
 
-            // Snapshot every original binding and curve before writing anything. A mapped target can itself be an
-            // original source binding; later iterations must still read that binding's original curve.
             var sourceFloatCurves = clip.GetFloatCurveBindings()
                 .Select(binding => new { Binding = binding, Curve = clip.GetFloatCurve(binding) })
                 .Where(item => item.Curve != null)
@@ -145,6 +167,12 @@ namespace THE_cattail.AfkMotionPatcher
                     appendedMappedCurveCount++;
                 }
             }
+
+            ApplyBoneRotationOffsets(
+                avatarRoot,
+                patch,
+                binding => clip.GetFloatCurve(binding),
+                (binding, curve) => clip.SetFloatCurve(binding, curve));
         }
 
         public static int EnableAnimationOnAffectedPhysBones(
@@ -220,13 +248,18 @@ namespace THE_cattail.AfkMotionPatcher
             memo[source] = composed;
             CopyClipSettings(source, composed);
 
+            if (!patch.stripAnimationEvents)
+            {
+                var events = AnimationUtility.GetAnimationEvents(source);
+                if (events != null && events.Length > 0)
+                    AnimationUtility.SetAnimationEvents(composed, events);
+            }
+
             foreach (var sourceBinding in AnimationUtility.GetCurveBindings(source))
             {
                 var sourceCurve = AnimationUtility.GetEditorCurve(source, sourceBinding);
                 if (sourceCurve == null) continue;
 
-                // Match build-time semantics: adjust source keys once, copy them, then append
-                // path/property mappings from the same adjusted motion.
                 var adjustedSourceCurve = TransformCurve(sourceCurve, GetSourceKeyTransform(sourceBinding, patch));
                 AnimationUtility.SetEditorCurve(composed, sourceBinding, adjustedSourceCurve);
                 copiedSourceCurveCount++;
@@ -255,6 +288,12 @@ namespace THE_cattail.AfkMotionPatcher
                 }
             }
 
+            ApplyBoneRotationOffsets(
+                avatarRoot,
+                patch,
+                binding => AnimationUtility.GetEditorCurve(composed, binding),
+                (binding, curve) => AnimationUtility.SetEditorCurve(composed, binding, curve));
+
             var sourceSettings = AnimationUtility.GetAnimationClipSettings(source);
             if (sourceSettings.additiveReferencePoseClip)
             {
@@ -270,6 +309,118 @@ namespace THE_cattail.AfkMotionPatcher
             }
 
             return composed;
+        }
+
+        private static void ApplyBoneRotationOffsets(
+            GameObject avatarRoot,
+            AfkMotionPatch patch,
+            Func<EditorCurveBinding, AnimationCurve> getCurve,
+            Action<EditorCurveBinding, AnimationCurve> setCurve)
+        {
+            if (patch.boneRotationOffsets == null || patch.boneRotationOffsets.Count == 0) return;
+
+            foreach (var entry in patch.boneRotationOffsets)
+            {
+                if (entry == null || string.IsNullOrEmpty(entry.bonePath)) continue;
+                if (entry.eulerOffset.sqrMagnitude < 1e-6f) continue;
+
+                var path = entry.bonePath;
+                var bx = EditorCurveBinding.FloatCurve(path, typeof(Transform), "localEulerAnglesRaw.x");
+                var by = EditorCurveBinding.FloatCurve(path, typeof(Transform), "localEulerAnglesRaw.y");
+                var bz = EditorCurveBinding.FloatCurve(path, typeof(Transform), "localEulerAnglesRaw.z");
+                var cx = getCurve(bx);
+                var cy = getCurve(by);
+                var cz = getCurve(bz);
+
+                if (cx != null || cy != null || cz != null)
+                {
+                    var targetTransform = avatarRoot ? avatarRoot.transform.Find(path) : null;
+                    var restEuler = targetTransform ? targetTransform.localEulerAngles : Vector3.zero;
+                    if (Mathf.Abs(entry.eulerOffset.x) > 1e-4f || cx != null)
+                        setCurve(bx, OffsetOrConstantCurve(cx, restEuler.x, entry.eulerOffset.x));
+                    if (Mathf.Abs(entry.eulerOffset.y) > 1e-4f || cy != null)
+                        setCurve(by, OffsetOrConstantCurve(cy, restEuler.y, entry.eulerOffset.y));
+                    if (Mathf.Abs(entry.eulerOffset.z) > 1e-4f || cz != null)
+                        setCurve(bz, OffsetOrConstantCurve(cz, restEuler.z, entry.eulerOffset.z));
+                    continue;
+                }
+
+                var qxB = EditorCurveBinding.FloatCurve(path, typeof(Transform), "m_LocalRotation.x");
+                var qyB = EditorCurveBinding.FloatCurve(path, typeof(Transform), "m_LocalRotation.y");
+                var qzB = EditorCurveBinding.FloatCurve(path, typeof(Transform), "m_LocalRotation.z");
+                var qwB = EditorCurveBinding.FloatCurve(path, typeof(Transform), "m_LocalRotation.w");
+                var qx = getCurve(qxB);
+                var qy = getCurve(qyB);
+                var qz = getCurve(qzB);
+                var qw = getCurve(qwB);
+
+                if (qx != null && qy != null && qz != null && qw != null)
+                {
+                    var times = qx.keys.Select(k => k.time)
+                        .Concat(qy.keys.Select(k => k.time))
+                        .Concat(qz.keys.Select(k => k.time))
+                        .Concat(qw.keys.Select(k => k.time))
+                        .Distinct()
+                        .OrderBy(t => t)
+                        .ToArray();
+                    if (times.Length == 0) times = new[] { 0f };
+
+                    var delta = Quaternion.Euler(entry.eulerOffset);
+                    var nqx = new AnimationCurve();
+                    var nqy = new AnimationCurve();
+                    var nqz = new AnimationCurve();
+                    var nqw = new AnimationCurve();
+                    Quaternion? prev = null;
+                    foreach (var t in times)
+                    {
+                        var orig = new Quaternion(qx.Evaluate(t), qy.Evaluate(t), qz.Evaluate(t), qw.Evaluate(t));
+                        if (orig.x * orig.x + orig.y * orig.y + orig.z * orig.z + orig.w * orig.w < 1e-6f)
+                            orig = Quaternion.identity;
+                        else
+                            orig = Quaternion.Normalize(orig);
+                        var rot = Quaternion.Normalize(orig * delta);
+                        if (prev.HasValue && Quaternion.Dot(prev.Value, rot) < 0f)
+                            rot = new Quaternion(-rot.x, -rot.y, -rot.z, -rot.w);
+                        prev = rot;
+                        nqx.AddKey(t, rot.x);
+                        nqy.AddKey(t, rot.y);
+                        nqz.AddKey(t, rot.z);
+                        nqw.AddKey(t, rot.w);
+                    }
+                    setCurve(qxB, nqx);
+                    setCurve(qyB, nqy);
+                    setCurve(qzB, nqz);
+                    setCurve(qwB, nqw);
+                    continue;
+                }
+
+                // No existing rotation curve on this bone: write a constant offset from rest pose if the bone exists.
+                var bone = avatarRoot ? avatarRoot.transform.Find(path) : null;
+                if (bone)
+                {
+                    var rest = bone.localEulerAngles;
+                    setCurve(bx, AnimationCurve.Constant(0f, 0f, rest.x + entry.eulerOffset.x));
+                    setCurve(by, AnimationCurve.Constant(0f, 0f, rest.y + entry.eulerOffset.y));
+                    setCurve(bz, AnimationCurve.Constant(0f, 0f, rest.z + entry.eulerOffset.z));
+                }
+            }
+        }
+
+        private static AnimationCurve OffsetOrConstantCurve(AnimationCurve source, float restValue, float offset)
+        {
+            if (source == null || source.length == 0)
+                return AnimationCurve.Constant(0f, 0f, restValue + offset);
+
+            var keys = source.keys.Select(k =>
+            {
+                k.value += offset;
+                return k;
+            }).ToArray();
+            return new AnimationCurve(keys)
+            {
+                preWrapMode = source.preWrapMode,
+                postWrapMode = source.postWrapMode
+            };
         }
 
         private static void CopyClipSettings(AnimationClip source, VirtualClip target)
@@ -456,8 +607,6 @@ namespace THE_cattail.AfkMotionPatcher
 
         private static float TransformTangent(float tangent, float scale)
         {
-            // Infinite tangents encode stepped/discrete curves. Preserve that sentinel instead of
-            // producing NaN for valid transforms such as scale=0.
             return float.IsInfinity(tangent) ? tangent : tangent * scale;
         }
 

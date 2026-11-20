@@ -16,11 +16,15 @@ namespace THE_cattail.AfkMotionPatcher
     internal sealed class AfkMotionPatchInspector : UnityEditor.Editor
     {
         private SerializedProperty _sourceAvatar;
+        private SerializedProperty _actionMergeMode;
+        private SerializedProperty _stripAnimationEvents;
+        private SerializedProperty _boneRotationOffsets;
         private SerializedProperty _rendererPathRemaps;
         private SerializedProperty _blendShapeNameRemaps;
         private SerializedProperty _sourceKeyAdjustments;
         private SerializedProperty _sourceBindingRules;
 
+        private ReorderableList _boneOffsetList;
         private ReorderableList _rendererPathList;
         private ReorderableList _blendShapeList;
         private ReorderableList _sourceKeyAdjustmentList;
@@ -28,13 +32,17 @@ namespace THE_cattail.AfkMotionPatcher
         private List<EditorCurveBinding> _sourceBindingsCache;
         private List<EditorCurveBinding> _targetBindingsCache;
 
-        private bool _showSourceMotions;
-        private bool _showRendererPaths;
+        private bool _showSourceSection;
+        private bool _showTuningSection;
+        private bool _showBoneOffsets;
         private bool _showBlendShapeMappings;
+        private bool _showAdvancedSection;
+        private bool _showRendererPaths;
         private bool _showSourceCurveAdjustments;
         private bool _showAdditionalBindingRules;
+        private string _lastActionFeedback;
 
-        private const string FoldoutPrefsPrefix = "THE_cattail.AfkMotionPatcher.Inspector.";
+        private const string FoldoutPrefsPrefix = "THE_cattail.AfkMotionPatcher.Inspector.v2.";
         private const float RowGap = 3f;
         private const float ElementPadding = 4f;
         private const float DynamicLabelGap = 4f;
@@ -43,21 +51,29 @@ namespace THE_cattail.AfkMotionPatcher
         private void OnEnable()
         {
             _sourceAvatar = serializedObject.FindProperty(nameof(AfkMotionPatch.sourceAvatar));
+            _actionMergeMode = serializedObject.FindProperty(nameof(AfkMotionPatch.actionMergeMode));
+            _stripAnimationEvents = serializedObject.FindProperty(nameof(AfkMotionPatch.stripAnimationEvents));
+            _boneRotationOffsets = serializedObject.FindProperty(nameof(AfkMotionPatch.boneRotationOffsets));
             _rendererPathRemaps = serializedObject.FindProperty(nameof(AfkMotionPatch.rendererPathRemaps));
             _blendShapeNameRemaps = serializedObject.FindProperty(nameof(AfkMotionPatch.blendShapeNameRemaps));
             _sourceKeyAdjustments = serializedObject.FindProperty(nameof(AfkMotionPatch.sourceKeyAdjustments));
             _sourceBindingRules = serializedObject.FindProperty(nameof(AfkMotionPatch.sourceBindingRules));
 
+            _boneOffsetList = CreateBoneOffsetList();
             _rendererPathList = CreateRendererPathList();
             _blendShapeList = CreateBlendShapeList();
             _sourceKeyAdjustmentList = CreateSourceKeyAdjustmentList();
             _bindingRuleList = CreateBindingRuleList();
 
-            _showSourceMotions = LoadFoldoutState("SourceAfk", true);
-            _showRendererPaths = LoadFoldoutState("RendererPaths", false);
+            _showSourceSection = LoadFoldoutState("SourceSection", true);
+            _showTuningSection = LoadFoldoutState("TuningSection", true);
+            _showBoneOffsets = LoadFoldoutState("BoneOffsets", true);
             _showBlendShapeMappings = LoadFoldoutState("BlendShapeMappings", false);
+            _showAdvancedSection = LoadFoldoutState("AdvancedSection", false);
+            _showRendererPaths = LoadFoldoutState("RendererPaths", false);
             _showSourceCurveAdjustments = LoadFoldoutState("SourceCurveAdjustments", false);
             _showAdditionalBindingRules = LoadFoldoutState("AdditionalBindingRules", false);
+
             EditorApplication.projectChanged += InvalidateBindingCaches;
             EditorApplication.hierarchyChanged += InvalidateBindingCaches;
             Undo.undoRedoPerformed += InvalidateBindingCaches;
@@ -91,19 +107,25 @@ namespace THE_cattail.AfkMotionPatcher
             serializedObject.Update();
             var patch = (AfkMotionPatch)target;
             var oldLabelWidth = EditorGUIUtility.labelWidth;
-            EditorGUIUtility.labelWidth = Mathf.Min(96f, EditorGUIUtility.currentViewWidth * 0.32f);
+            EditorGUIUtility.labelWidth = Mathf.Min(132f, EditorGUIUtility.currentViewWidth * 0.38f);
             try
             {
                 DrawLanguageSwitcher();
                 EditorGUILayout.Space(2f);
                 DrawStatus(patch);
                 DrawPrimaryActions(patch);
-                DrawSourceAfk();
-                DrawRendererPaths();
-                DrawBlendShapeMappings();
-                DrawSourceCurveAdjustments();
-                DrawAdditionalBindingRules();
-                if (serializedObject.ApplyModifiedProperties()) InvalidateBindingCaches();
+                EditorGUILayout.Space(4f);
+                DrawSourceAndMergeSection();
+                EditorGUILayout.Space(2f);
+                DrawAutoMatchAndTuningSection(patch);
+                EditorGUILayout.Space(2f);
+                DrawAdvancedSection();
+
+                if (serializedObject.ApplyModifiedProperties())
+                {
+                    InvalidateBindingCaches();
+                    AfkMotionPreviewWindow.NotifyPatchChanged(patch);
+                }
             }
             finally
             {
@@ -117,27 +139,51 @@ namespace THE_cattail.AfkMotionPatcher
             if (!avatar)
             {
                 EditorGUILayout.HelpBox(T("Avatar root not found. Place this component anywhere under a VRChat avatar."), MessageType.Error);
+                return;
             }
-            else if (avatar.GetComponentsInChildren<AfkMotionPatch>(true)
-                         .Count(candidate => candidate.enabled && candidate.gameObject.activeInHierarchy) > 1)
+            if (avatar.GetComponentsInChildren<AfkMotionPatch>(true)
+                .Count(candidate => candidate.enabled && candidate.gameObject.activeInHierarchy) > 1)
             {
                 EditorGUILayout.HelpBox(T("Multiple active AFK Motion Patch components were found under this Avatar. Keep exactly one enabled component."), MessageType.Error);
+                return;
             }
-            else if (!_sourceAvatar.objectReferenceValue)
+            if (!_sourceAvatar.objectReferenceValue)
             {
                 EditorGUILayout.HelpBox(T("Source Avatar is missing. Assign the Avatar prefab whose AFK motion is being adapted."), MessageType.Error);
+                return;
             }
-            else if (!AfkMotionSourceGraph.TryExtract(patch, out var sourceGraph, out var graphError))
+            if (!AfkMotionSourceGraph.TryExtract(patch, out var sourceGraph, out var graphError))
             {
                 EditorGUILayout.HelpBox(F("AFK source graph error: {0}", graphError), MessageType.Error);
+                return;
             }
-            else if (!sourceGraph.ValidateStateMotions(patch, out var motionError))
+            if (!sourceGraph.ValidateStateMotions(patch, out var motionError))
             {
                 EditorGUILayout.HelpBox(F("The adapter preset's internal source Motion data is invalid. Update or reimport the preset. {0}", motionError), MessageType.Error);
+                return;
             }
-            else if (!sourceGraph.EffectiveSourceClips(patch).Any())
+            if (!sourceGraph.EffectiveSourceClips(patch).Any())
             {
                 EditorGUILayout.HelpBox(T("The AFK source graph and adapter preset provide no usable Motion. Update or reimport the source package and preset."), MessageType.Error);
+                return;
+            }
+
+            var eventClips = sourceGraph.GetClipsWithAnimationEvents(patch);
+            if (eventClips.Count > 0)
+            {
+                var names = string.Join(", ", eventClips.Select(c => c.name));
+                if (_stripAnimationEvents.boolValue)
+                {
+                    EditorGUILayout.HelpBox(
+                        F("Source AFK clips contain AnimationEvents ({0}). They will be stripped safely during build and preview.", names),
+                        MessageType.Info);
+                }
+                else
+                {
+                    EditorGUILayout.HelpBox(
+                        F("Source AFK clips contain AnimationEvents ({0}). Keeping them may fail or warn on avatars without matching receiver scripts.", names),
+                        MessageType.Warning);
+                }
             }
         }
 
@@ -149,66 +195,157 @@ namespace THE_cattail.AfkMotionPatcher
             }
         }
 
-        private void DrawSourceAfk()
+        private void DrawSourceAndMergeSection()
         {
-            _showSourceMotions = BeginPersistentFoldout(
-                _showSourceMotions, T("AFK Source"), "SourceAfk", _sourceAvatar);
-            if (_showSourceMotions)
+            _showSourceSection = BeginPersistentFoldout(
+                _showSourceSection, T("1. Source & Action Merge"), "SourceSection", _sourceAvatar);
+            if (_showSourceSection)
             {
                 using (new EditorGUI.IndentLevelScope())
                 {
                     EditorGUILayout.PropertyField(_sourceAvatar, new GUIContent(T("Avatar")));
+
+                    var modeLabels = new[]
+                    {
+                        new GUIContent(T("Preserve Existing Action (Recommended)")),
+                        new GUIContent(T("Replace Entire Action"))
+                    };
+                    var currentMode = Mathf.Clamp(_actionMergeMode.enumValueIndex, 0, modeLabels.Length - 1);
+                    var nextMode = EditorGUILayout.Popup(new GUIContent(T("Action Merge Mode")), currentMode, modeLabels);
+                    if (nextMode != currentMode) _actionMergeMode.enumValueIndex = nextMode;
+
+                    var modeDescription = nextMode == (int)AfkMotionPatch.ActionMergeMode.PreserveExistingAction
+                        ? T("Keeps GoGoLoco, dances, and poses intact while replacing only the AFK trigger branch.")
+                        : T("Replaces the entire Action Controller with only the extracted AFK graph.");
+                    DrawGroupDescription(modeDescription);
+
+                    EditorGUILayout.PropertyField(_stripAnimationEvents, new GUIContent(T("Strip Animation Events")));
                 }
             }
             EditorGUILayout.EndFoldoutHeaderGroup();
         }
 
-        private void DrawRendererPaths()
+        private void DrawAutoMatchAndTuningSection(AfkMotionPatch patch)
         {
-            _showRendererPaths = BeginPersistentFoldout(
-                _showRendererPaths, F("Hierarchy Mappings ({0})", _rendererPathRemaps.arraySize), "RendererPaths", _rendererPathRemaps);
-            if (_showRendererPaths)
+            _showTuningSection = BeginPersistentFoldout(
+                _showTuningSection, T("2. Auto-Match & Pose Tuning"), "TuningSection", _boneRotationOffsets);
+            if (_showTuningSection)
             {
-                DrawGroupDescription(T("Maps animated objects or bones between different source and target Avatar hierarchies."));
-                _rendererPathList.DoLayoutList();
+                var targetAvatar = GetAvatarRoot();
+                var canAutoMatch = targetAvatar && patch.sourceAvatar;
+
+                using (new EditorGUI.DisabledScope(!canAutoMatch))
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    if (GUILayout.Button(T("Auto-Match Hierarchy & BlendShapes"), GUILayout.Height(24f)))
+                    {
+                        Undo.RecordObject(patch, "Auto-Match Hierarchy & BlendShapes");
+                        var summary = AfkMotionAutoMatcher.AutoMatchHierarchyAndBlendShapes(
+                            patch, targetAvatar.gameObject, GetSourceBindings());
+                        EditorUtility.SetDirty(patch);
+                        serializedObject.Update();
+                        InvalidateBindingCaches();
+                        AfkMotionPreviewWindow.NotifyPatchChanged(patch);
+                        _lastActionFeedback = (summary.AddedHierarchyMappings > 0 || summary.AddedBlendShapeMappings > 0)
+                            ? F("Auto-Match complete: +{0} hierarchy, +{1} BlendShapes.",
+                                summary.AddedHierarchyMappings, summary.AddedBlendShapeMappings)
+                            : T("Auto-Match found no additional unmatched items.");
+                    }
+
+                    if (GUILayout.Button(T("Match Rest-Pose Delta"), GUILayout.Height(24f)))
+                    {
+                        Undo.RecordObject(patch, "Match Rest-Pose Delta");
+                        var summary = AfkMotionAutoMatcher.MatchRestPoseDeltas(
+                            patch, targetAvatar.gameObject, GetSourceBindings());
+                        EditorUtility.SetDirty(patch);
+                        serializedObject.Update();
+                        InvalidateBindingCaches();
+                        AfkMotionPreviewWindow.NotifyPatchChanged(patch);
+                        _lastActionFeedback = (summary.AddedOffsets > 0 || summary.UpdatedOffsets > 0)
+                            ? F("Rest-Pose Delta updated: +{0} added, {1} updated.",
+                                summary.AddedOffsets, summary.UpdatedOffsets)
+                            : T("No non-zero rest-pose angle difference was found for mapped bones.");
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(_lastActionFeedback))
+                {
+                    EditorGUILayout.HelpBox(_lastActionFeedback, MessageType.Info);
+                }
+
+                EditorGUILayout.Space(2f);
+                _showBoneOffsets = DrawSubFoldout(
+                    _showBoneOffsets,
+                    F("Bone Pose Offsets ({0})", _boneRotationOffsets.arraySize),
+                    "BoneOffsets",
+                    _boneRotationOffsets);
+                if (_showBoneOffsets)
+                {
+                    DrawGroupDescription(T("Fine-tune local Pitch / Yaw / Roll angles in degrees. Changes update the Preview window live."));
+                    _boneOffsetList.DoLayoutList();
+                }
+
+                _showBlendShapeMappings = DrawSubFoldout(
+                    _showBlendShapeMappings,
+                    F("Expression BlendShapes ({0})", _blendShapeNameRemaps.arraySize),
+                    "BlendShapeMappings",
+                    _blendShapeNameRemaps);
+                if (_showBlendShapeMappings)
+                {
+                    DrawGroupDescription(T("Maps source BlendShapes to target BlendShapes and adjusts expression strength."));
+                    _blendShapeList.DoLayoutList();
+                }
             }
             EditorGUILayout.EndFoldoutHeaderGroup();
         }
 
-        private void DrawBlendShapeMappings()
+        private void DrawAdvancedSection()
         {
-            _showBlendShapeMappings = BeginPersistentFoldout(
-                _showBlendShapeMappings, F("BlendShape Mappings ({0})", _blendShapeNameRemaps.arraySize), "BlendShapeMappings", _blendShapeNameRemaps);
-            if (_showBlendShapeMappings)
+            var totalAdvanced = _rendererPathRemaps.arraySize
+                + _sourceKeyAdjustments.arraySize
+                + _sourceBindingRules.arraySize;
+            _showAdvancedSection = BeginPersistentFoldout(
+                _showAdvancedSection,
+                $"{T("3. Advanced Rules")} ({totalAdvanced})",
+                "AdvancedSection",
+                _sourceBindingRules);
+            if (_showAdvancedSection)
             {
-                DrawGroupDescription(T("Maps a source BlendShape to the corresponding BlendShape on the target avatar."));
-                _blendShapeList.DoLayoutList();
-            }
-            EditorGUILayout.EndFoldoutHeaderGroup();
-        }
+                using (new EditorGUI.IndentLevelScope())
+                {
+                    _showRendererPaths = DrawSubFoldout(
+                        _showRendererPaths,
+                        F("Hierarchy Mappings ({0})", _rendererPathRemaps.arraySize),
+                        "RendererPaths",
+                        _rendererPathRemaps);
+                    if (_showRendererPaths)
+                    {
+                        DrawGroupDescription(T("Maps animated objects or bones between different source and target Avatar hierarchies."));
+                        _rendererPathList.DoLayoutList();
+                    }
 
-        private void DrawSourceCurveAdjustments()
-        {
-            _showSourceCurveAdjustments = BeginPersistentFoldout(
-                _showSourceCurveAdjustments, F("Curve Adjustments ({0})", _sourceKeyAdjustments.arraySize),
-                "SourceCurveAdjustments", _sourceKeyAdjustments);
-            if (_showSourceCurveAdjustments)
-            {
-                DrawGroupDescription(T("Adjusts animation curve values before they are copied or mapped."));
-                _sourceKeyAdjustmentList.DoLayoutList();
-            }
-            EditorGUILayout.EndFoldoutHeaderGroup();
-        }
+                    _showSourceCurveAdjustments = DrawSubFoldout(
+                        _showSourceCurveAdjustments,
+                        F("Curve Adjustments ({0})", _sourceKeyAdjustments.arraySize),
+                        "SourceCurveAdjustments",
+                        _sourceKeyAdjustments);
+                    if (_showSourceCurveAdjustments)
+                    {
+                        DrawGroupDescription(T("Adjusts animation curve values before they are copied or mapped."));
+                        _sourceKeyAdjustmentList.DoLayoutList();
+                    }
 
-        private void DrawAdditionalBindingRules()
-        {
-            _showAdditionalBindingRules = BeginPersistentFoldout(
-                _showAdditionalBindingRules, F("Advanced Binding Mappings ({0})", _sourceBindingRules.arraySize),
-                "AdditionalBindingRules", _sourceBindingRules);
-            if (_showAdditionalBindingRules)
-            {
-                DrawGroupDescription(T("Maps one animation property to an additional target property with optional value adjustment."));
-                _bindingRuleList.DoLayoutList();
+                    _showAdditionalBindingRules = DrawSubFoldout(
+                        _showAdditionalBindingRules,
+                        F("Advanced Binding Mappings ({0})", _sourceBindingRules.arraySize),
+                        "AdditionalBindingRules",
+                        _sourceBindingRules);
+                    if (_showAdditionalBindingRules)
+                    {
+                        DrawGroupDescription(T("Maps one animation property to an additional target property with optional value adjustment."));
+                        _bindingRuleList.DoLayoutList();
+                    }
+                }
             }
             EditorGUILayout.EndFoldoutHeaderGroup();
         }
@@ -221,6 +358,14 @@ namespace THE_cattail.AfkMotionPatcher
         private bool BeginPersistentFoldout(bool expanded, string label, string key, SerializedProperty property)
         {
             var next = EditorGUILayout.BeginFoldoutHeaderGroup(expanded, label);
+            if (next != expanded) EditorPrefs.SetBool(FoldoutPrefsPrefix + key, next);
+            ShowGroupContextMenu(GUILayoutUtility.GetLastRect(), property, label);
+            return next;
+        }
+
+        private bool DrawSubFoldout(bool expanded, string label, string key, SerializedProperty property)
+        {
+            var next = EditorGUILayout.Foldout(expanded, label, true, EditorStyles.foldoutHeader);
             if (next != expanded) EditorPrefs.SetBool(FoldoutPrefsPrefix + key, next);
             ShowGroupContextMenu(GUILayoutUtility.GetLastRect(), property, label);
             return next;
@@ -307,6 +452,82 @@ namespace THE_cattail.AfkMotionPatcher
             menu.ShowAsContext();
         }
 
+        private ReorderableList CreateBoneOffsetList()
+        {
+            return new ReorderableList(serializedObject, _boneRotationOffsets, true, false, true, true)
+            {
+                elementHeight = LineHeight(4),
+                drawElementCallback = (rect, index, active, focused) =>
+                {
+                    var elementRect = rect;
+                    var element = _boneRotationOffsets.GetArrayElementAtIndex(index);
+                    ShowElementContextMenu(elementRect, element);
+                    PrepareElementRect(ref rect);
+
+                    var bonePathProp = element.FindPropertyRelative("bonePath");
+                    var eulerProp = element.FindPropertyRelative("eulerOffset");
+                    var labelWidth = MeasureLabelWidth(T("Bone"), T("Pitch (X)"), T("Yaw (Y)"), T("Roll (Z)"));
+
+                    // Row 1: Target bone field + Delta + Reset buttons
+                    const float btnWidth = 54f;
+                    const float btnGap = 3f;
+                    var boneRow = new Rect(rect.x, rect.y, rect.width - (btnWidth * 2f + btnGap * 2f), rect.height);
+                    var deltaRect = new Rect(boneRow.xMax + btnGap, rect.y, btnWidth, rect.height);
+                    var resetRect = new Rect(deltaRect.xMax + btnGap, rect.y, btnWidth, rect.height);
+
+                    DrawTargetTransformFieldInline(boneRow, bonePathProp, T("Bone"), labelWidth);
+
+                    var patch = (AfkMotionPatch)target;
+                    var targetAvatar = GetAvatarRoot();
+                    using (new EditorGUI.DisabledScope(!targetAvatar || !patch.sourceAvatar || string.IsNullOrEmpty(bonePathProp.stringValue)))
+                    {
+                        if (GUI.Button(deltaRect, T("Delta"), EditorStyles.miniButton))
+                        {
+                            if (AfkMotionAutoMatcher.TryComputeRestPoseDeltaForTargetBone(
+                                patch, targetAvatar.gameObject, bonePathProp.stringValue, out var delta))
+                            {
+                                eulerProp.vector3Value = new Vector3(
+                                    Mathf.Clamp(Mathf.Round(delta.x * 10f) / 10f, -90f, 90f),
+                                    Mathf.Clamp(Mathf.Round(delta.y * 10f) / 10f, -90f, 90f),
+                                    Mathf.Clamp(Mathf.Round(delta.z * 10f) / 10f, -90f, 90f));
+                            }
+                        }
+                    }
+
+                    if (GUI.Button(resetRect, T("Reset"), EditorStyles.miniButton))
+                    {
+                        eulerProp.vector3Value = Vector3.zero;
+                    }
+                    AdvanceRow(ref rect);
+
+                    // Rows 2-4: Pitch (X), Yaw (Y), Roll (Z) sliders (-90° ~ +90°)
+                    var euler = eulerProp.vector3Value;
+                    var nextX = DrawAngleSlider(ref rect, T("Pitch (X)"), labelWidth, euler.x);
+                    var nextY = DrawAngleSlider(ref rect, T("Yaw (Y)"), labelWidth, euler.y);
+                    var nextZ = DrawAngleSlider(ref rect, T("Roll (Z)"), labelWidth, euler.z);
+                    if (!Mathf.Approximately(nextX, euler.x)
+                        || !Mathf.Approximately(nextY, euler.y)
+                        || !Mathf.Approximately(nextZ, euler.z))
+                    {
+                        eulerProp.vector3Value = new Vector3(nextX, nextY, nextZ);
+                    }
+                },
+                onAddCallback = _ => AddElement(_boneRotationOffsets, element =>
+                {
+                    element.FindPropertyRelative("bonePath").stringValue = string.Empty;
+                    element.FindPropertyRelative("eulerOffset").vector3Value = Vector3.zero;
+                })
+            };
+        }
+
+        private static float DrawAngleSlider(ref Rect rect, string label, float labelWidth, float value)
+        {
+            var fieldRect = DynamicPrefixLabel(rect, label, labelWidth);
+            var next = EditorGUI.Slider(fieldRect, value, -90f, 90f);
+            AdvanceRow(ref rect);
+            return next;
+        }
+
         private ReorderableList CreateRendererPathList()
         {
             return new ReorderableList(serializedObject, _rendererPathRemaps, true, false, true, true)
@@ -336,11 +557,11 @@ namespace THE_cattail.AfkMotionPatcher
                     var element = _blendShapeNameRemaps.GetArrayElementAtIndex(index);
                     ShowElementContextMenu(elementRect, element);
                     PrepareElementRect(ref rect);
-                    var labelWidth = MeasureLabelWidth(T("Source"), T("Target"), T("Scale"), T("Offset"),
+                    var labelWidth = MeasureLabelWidth(T("Source"), T("Target"), T("Strength"), T("Offset"),
                         T("Clamp"), T("Minimum"), T("Maximum"));
                     DrawBlendShapePicker(ref rect, element.FindPropertyRelative("fromName"), T("Source"), true, labelWidth);
                     DrawBlendShapePicker(ref rect, element.FindPropertyRelative("toName"), T("Target"), false, labelWidth);
-                    DrawTuningFields(ref rect, element, labelWidth);
+                    DrawBlendShapeTuningFields(ref rect, element, labelWidth);
                 },
                 onAddCallback = _ => AddElement(_blendShapeNameRemaps, element =>
                 {
@@ -349,6 +570,23 @@ namespace THE_cattail.AfkMotionPatcher
                     SetTuningDefaults(element);
                 })
             };
+        }
+
+        private static void DrawBlendShapeTuningFields(ref Rect rect, SerializedProperty element, float labelWidth)
+        {
+            var scaleProp = element.FindPropertyRelative("scale");
+            var fieldRect = DynamicPrefixLabel(rect, T("Strength"), labelWidth);
+            scaleProp.floatValue = EditorGUI.Slider(fieldRect, scaleProp.floatValue, 0f, 2f);
+            AdvanceRow(ref rect);
+
+            var clamp = element.FindPropertyRelative("clamp");
+            DrawFullWidthProperty(ref rect, element.FindPropertyRelative("offset"), T("Offset"), labelWidth);
+            DrawFullWidthProperty(ref rect, clamp, T("Clamp"), labelWidth);
+            using (new EditorGUI.DisabledScope(!clamp.boolValue))
+            {
+                DrawFullWidthProperty(ref rect, element.FindPropertyRelative("clampMin"), T("Minimum"), labelWidth);
+                DrawFullWidthProperty(ref rect, element.FindPropertyRelative("clampMax"), T("Maximum"), labelWidth);
+            }
         }
 
         private ReorderableList CreateSourceKeyAdjustmentList()
@@ -427,9 +665,15 @@ namespace THE_cattail.AfkMotionPatcher
 
         private void DrawTargetTransformField(ref Rect rect, SerializedProperty property, string label, float labelWidth)
         {
+            DrawTargetTransformFieldInline(rect, property, label, labelWidth);
+            AdvanceRow(ref rect);
+        }
+
+        private void DrawTargetTransformFieldInline(Rect rect, SerializedProperty property, string label, float labelWidth)
+        {
             var avatar = GetAvatarRoot();
             var current = avatar
-                ? (string.IsNullOrEmpty(property.stringValue) ? avatar : avatar.Find(property.stringValue))
+                ? (string.IsNullOrEmpty(property.stringValue) ? null : avatar.Find(property.stringValue))
                 : null;
             var fieldRect = DynamicPrefixLabel(rect, label, labelWidth);
             EditorGUI.BeginChangeCheck();
@@ -456,7 +700,6 @@ namespace THE_cattail.AfkMotionPatcher
                 EditorGUI.LabelField(fieldRect, property.stringValue);
                 GUI.contentColor = oldColor;
             }
-            AdvanceRow(ref rect);
         }
 
         private void DrawBlendShapePicker(ref Rect rect, SerializedProperty property, string label, bool source,
@@ -599,6 +842,7 @@ namespace THE_cattail.AfkMotionPatcher
             element.FindPropertyRelative("sourcePropertyName").stringValue = binding.propertyName;
             serializedObject.ApplyModifiedProperties();
             InvalidateBindingCaches();
+            AfkMotionPreviewWindow.NotifyPatchChanged((AfkMotionPatch)target);
         }
 
         private void ClearSourceBinding(string elementPath)
@@ -610,6 +854,7 @@ namespace THE_cattail.AfkMotionPatcher
             element.FindPropertyRelative("sourcePropertyName").stringValue = string.Empty;
             serializedObject.ApplyModifiedProperties();
             InvalidateBindingCaches();
+            AfkMotionPreviewWindow.NotifyPatchChanged((AfkMotionPatch)target);
         }
 
         private void SetTargetBinding(string elementPath, EditorCurveBinding binding)
@@ -620,6 +865,7 @@ namespace THE_cattail.AfkMotionPatcher
             element.FindPropertyRelative("targetPropertyName").stringValue = binding.propertyName;
             serializedObject.ApplyModifiedProperties();
             InvalidateBindingCaches();
+            AfkMotionPreviewWindow.NotifyPatchChanged((AfkMotionPatch)target);
         }
 
         private void ClearTargetBinding(string elementPath)
@@ -630,6 +876,7 @@ namespace THE_cattail.AfkMotionPatcher
             element.FindPropertyRelative("targetPropertyName").stringValue = string.Empty;
             serializedObject.ApplyModifiedProperties();
             InvalidateBindingCaches();
+            AfkMotionPreviewWindow.NotifyPatchChanged((AfkMotionPatch)target);
         }
 
         private void SetStringProperty(SerializedProperty property, string value)
@@ -643,6 +890,7 @@ namespace THE_cattail.AfkMotionPatcher
             serializedObject.FindProperty(propertyPath).stringValue = value;
             serializedObject.ApplyModifiedProperties();
             InvalidateBindingCaches();
+            AfkMotionPreviewWindow.NotifyPatchChanged((AfkMotionPatch)target);
         }
 
         private static string SourceComponentLabel(AfkMotionPatch.SourceBindingComponent component)

@@ -60,6 +60,17 @@ namespace THE_cattail.AfkMotionPatcher
             window.Repaint();
         }
 
+        public static void NotifyPatchChanged(AfkMotionPatch patch)
+        {
+            if (!patch || !HasOpenInstances<AfkMotionPreviewWindow>()) return;
+            foreach (var window in Resources.FindObjectsOfTypeAll<AfkMotionPreviewWindow>())
+            {
+                if (!window || window._sourcePatch != patch) continue;
+                window.RebuildPreviewClip();
+                window.Repaint();
+            }
+        }
+
         private void OnEnable()
         {
             _sourcePane = new PreviewPane("Source");

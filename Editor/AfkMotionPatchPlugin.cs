@@ -102,7 +102,8 @@ namespace THE_cattail.AfkMotionPatcher
                         try
                         {
                             virtualState.Motion = AfkMotionPatchEditorUtil.CloneSourceMotion(
-                                sourceGraph.ResolveMotion(patch, sourceState), privateMotions);
+                                sourceGraph.ResolveMotion(patch, sourceState), privateMotions,
+                                controllerContext.CloneContext, patch.stripAnimationEvents);
                         }
                         catch (Exception exception)
                         {
@@ -174,24 +175,156 @@ namespace THE_cattail.AfkMotionPatcher
             var enabledPhysBoneCount = AfkMotionPatchEditorUtil.EnableAnimationOnAffectedPhysBones(
                 avatarRoot, animatedTransformPaths);
 
-            // Animator Services must commit through the platform-owned Action slot so cross-playable layer controls
-            // retain the correct VRChat context. We replace that slot's complete contents without reading or merging
-            // any target-controller state, layer, transition, parameter, or Motion.
             if (!controllerContext.Controllers.TryGetValue(
                     VRCAvatarDescriptor.AnimLayerType.Action, out var actionSlot) || actionSlot == null)
             {
                 ReportSourceError(patch, $"[AfkMotionPatch] VRChat Action layer slot is unavailable for avatar={avatarRoot.name}.");
                 return;
             }
-            actionSlot.Name = generatedController.Name;
-            actionSlot.Parameters = generatedController.Parameters;
-            actionSlot.Layers = generatedController.Layers;
 
-            Debug.Log($"[AfkMotionPatch] Generated Action AFK graph from source controller via NDMF "
-                + $"avatar={avatarRoot.name}, sourceController={sourceGraph.Controller.name}, "
-                + $"layers={keptLayers.Count}, states={selectedStateCount}, clips={retargetedClipCount}, "
-                + $"copiedSourceCurves={copiedSourceCurves}, appendedMappedCurves={appendedMappedCurves}, "
-                + $"enabledPhysBones={enabledPhysBoneCount}", patch);
+            var strippedExistingAfkTransitions = 0;
+            if (patch.actionMergeMode == AfkMotionPatch.ActionMergeMode.PreserveExistingAction
+                && actionSlot.Layers != null && actionSlot.Layers.Any())
+            {
+                var existingLayers = actionSlot.Layers.ToList();
+                var usedLayerNames = new HashSet<string>(
+                    existingLayers.Select(l => l.Name ?? string.Empty), StringComparer.Ordinal);
+
+                foreach (var existingLayer in existingLayers)
+                {
+                    strippedExistingAfkTransitions += StripAfkEntryTransitions(existingLayer.StateMachine);
+                }
+
+                foreach (var appendedLayer in keptLayers)
+                {
+                    if (appendedLayer.OriginalPhysicalLayerIndex == 0 && appendedLayer.DefaultWeight <= 0.0001f)
+                    {
+                        appendedLayer.DefaultWeight = 1f;
+                    }
+                    var candidateName = string.IsNullOrEmpty(appendedLayer.Name)
+                        ? "AFK Motion Patch"
+                        : appendedLayer.Name;
+                    if (usedLayerNames.Contains(candidateName))
+                    {
+                        candidateName = EnsureUniqueLayerName(candidateName + " (AFK)", usedLayerNames);
+                    }
+                    appendedLayer.Name = candidateName;
+                    usedLayerNames.Add(candidateName);
+                }
+
+                var mergedParameters = actionSlot.Parameters != null
+                    ? actionSlot.Parameters.ToBuilder()
+                    : ImmutableDictionary.CreateBuilder<string, AnimatorControllerParameter>();
+                foreach (var pair in generatedController.Parameters)
+                {
+                    if (!mergedParameters.ContainsKey(pair.Key))
+                    {
+                        mergedParameters[pair.Key] = pair.Value;
+                    }
+                }
+
+                actionSlot.Parameters = mergedParameters.ToImmutable();
+                actionSlot.Layers = existingLayers.Concat(keptLayers).ToList();
+            }
+            else
+            {
+                actionSlot.Name = generatedController.Name;
+                actionSlot.Parameters = generatedController.Parameters;
+                actionSlot.Layers = generatedController.Layers;
+            }
+
+            Debug.Log($"[AfkMotionPatch] Applied Action AFK graph via NDMF "
+                + $"avatar={avatarRoot.name}, mode={patch.actionMergeMode}, sourceController={sourceGraph.Controller.name}, "
+                + $"totalLayers={actionSlot.Layers.Count()}, appendedLayers={keptLayers.Count}, "
+                + $"strippedOldAfkTransitions={strippedExistingAfkTransitions}, states={selectedStateCount}, "
+                + $"clips={retargetedClipCount}, copiedSourceCurves={copiedSourceCurves}, "
+                + $"appendedMappedCurves={appendedMappedCurves}, enabledPhysBones={enabledPhysBoneCount}", patch);
+        }
+
+        private static string EnsureUniqueLayerName(string baseName, HashSet<string> usedNames)
+        {
+            if (!usedNames.Contains(baseName)) return baseName;
+            for (var i = 2; i < 1000; i++)
+            {
+                var candidate = $"{baseName} {i}";
+                if (!usedNames.Contains(candidate)) return candidate;
+            }
+            return baseName + "_" + Guid.NewGuid().ToString("N").Substring(0, 6);
+        }
+
+        internal static int StripAfkEntryTransitions(VirtualStateMachine stateMachine)
+        {
+            if (stateMachine == null) return 0;
+            var stripped = 0;
+
+            var keptAny = new List<VirtualStateTransition>();
+            foreach (var transition in stateMachine.AnyStateTransitions)
+            {
+                if (IsAfkTrueTransition(transition)) stripped++;
+                else keptAny.Add(transition);
+            }
+            if (keptAny.Count != stateMachine.AnyStateTransitions.Count)
+                stateMachine.AnyStateTransitions = keptAny.ToImmutableList();
+
+            var keptEntry = new List<VirtualTransition>();
+            foreach (var transition in stateMachine.EntryTransitions)
+            {
+                if (IsAfkTrueTransition(transition)) stripped++;
+                else keptEntry.Add(transition);
+            }
+            if (keptEntry.Count != stateMachine.EntryTransitions.Count)
+                stateMachine.EntryTransitions = keptEntry.ToImmutableList();
+
+            foreach (var child in stateMachine.States)
+            {
+                var state = child.State;
+                if (state == null) continue;
+                var keptStateTransitions = new List<VirtualStateTransition>();
+                foreach (var transition in state.Transitions)
+                {
+                    if (IsAfkTrueTransition(transition)) stripped++;
+                    else keptStateTransitions.Add(transition);
+                }
+                if (keptStateTransitions.Count != state.Transitions.Count)
+                    state.Transitions = keptStateTransitions.ToImmutableList();
+            }
+
+            if (stateMachine.StateMachineTransitions != null && stateMachine.StateMachineTransitions.Count > 0)
+            {
+                var updatedSmTransitions = stateMachine.StateMachineTransitions.ToBuilder();
+                var changed = false;
+                foreach (var pair in stateMachine.StateMachineTransitions)
+                {
+                    var kept = new List<VirtualTransition>();
+                    foreach (var transition in pair.Value)
+                    {
+                        if (IsAfkTrueTransition(transition)) stripped++;
+                        else kept.Add(transition);
+                    }
+                    if (kept.Count != pair.Value.Count)
+                    {
+                        updatedSmTransitions[pair.Key] = kept.ToImmutableList();
+                        changed = true;
+                    }
+                }
+                if (changed) stateMachine.StateMachineTransitions = updatedSmTransitions.ToImmutable();
+            }
+
+            foreach (var childMachine in stateMachine.StateMachines)
+            {
+                if (childMachine.StateMachine != null)
+                    stripped += StripAfkEntryTransitions(childMachine.StateMachine);
+            }
+
+            return stripped;
+        }
+
+        private static bool IsAfkTrueTransition(VirtualTransitionBase transition)
+        {
+            if (transition == null || transition.Conditions == null) return false;
+            return transition.Conditions.Any(c =>
+                c.parameter == AfkMotionSourceGraph.AfkParameterName
+                && c.mode == AnimatorConditionMode.If);
         }
 
         private static void ReportSourceError(AfkMotionPatch patch, string message)

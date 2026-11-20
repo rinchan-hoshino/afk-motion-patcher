@@ -9,6 +9,12 @@ namespace THE_cattail.AfkMotionPatcher
     [AddComponentMenu("THE_cattail/AFK Motion Patch")]
     public sealed class AfkMotionPatch : MonoBehaviour, INDMFEditorOnly
     {
+        public enum ActionMergeMode
+        {
+            PreserveExistingAction = 0,
+            ReplaceEntireAction = 1,
+        }
+
         public enum SourceBindingComponent
         {
             Any = 0,
@@ -22,6 +28,15 @@ namespace THE_cattail.AfkMotionPatcher
             [Tooltip("Stable layer/state-machine/state path from the source Action Controller.")]
             public string statePath;
             public Motion motion;
+        }
+
+        [Serializable]
+        public sealed class BoneRotationOffset
+        {
+            [Tooltip("Target avatar bone path (relative to Avatar root).")]
+            public string bonePath;
+            [Tooltip("Local rotation offset in degrees: X = Pitch, Y = Yaw, Z = Roll.")]
+            public Vector3 eulerOffset;
         }
 
         [Serializable]
@@ -82,8 +97,18 @@ namespace THE_cattail.AfkMotionPatcher
 
         [Tooltip("Avatar prefab whose Action Controller and AFK motion bindings define Preview and build output.")]
         public GameObject sourceAvatar;
+
+        [Tooltip("Preserve existing Action layers (GoGoLoco, dances, poses) and surgically replace only AFK triggers, or replace the entire Action layer.")]
+        public ActionMergeMode actionMergeMode = ActionMergeMode.PreserveExistingAction;
+
+        [Tooltip("Safely strip AnimationEvents from source AFK clips during build and preview.")]
+        public bool stripAnimationEvents = true;
+
         [HideInInspector]
         public List<SourceStateMotion> sourceStateMotions = new List<SourceStateMotion>();
+
+        [Tooltip("Intuitive Pitch / Yaw / Roll degree offsets applied to target bones.")]
+        public List<BoneRotationOffset> boneRotationOffsets = new List<BoneRotationOffset>();
 
         public List<RendererPathRemap> rendererPathRemaps = new List<RendererPathRemap>();
         public List<BlendShapeNameRemap> blendShapeNameRemaps = new List<BlendShapeNameRemap>();
