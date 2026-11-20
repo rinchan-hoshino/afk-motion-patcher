@@ -602,6 +602,7 @@ namespace THE_cattail.AfkMotionPatcher
                 try
                 {
                     if (_processAvatar) ProcessResultPreviewClone(_instance);
+                    EnableForcedSkinning(_instance);
                     _preview.AddSingleGO(_instance);
                     RebuildResetClip(resetSources);
                 }
@@ -1070,6 +1071,17 @@ namespace THE_cattail.AfkMotionPatcher
             private void ResetToRestPose()
             {
                 if (_instance && _resetClip) _resetClip.SampleAnimation(_instance, 0f);
+            }
+
+            private static void EnableForcedSkinning(GameObject root)
+            {
+                if (!root) return;
+                foreach (var smr in root.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+                {
+                    if (!smr) continue;
+                    smr.forceMatrixRecalculationPerRender = true;
+                    smr.updateWhenOffscreen = true;
+                }
             }
 
             private void DestroyInstance()

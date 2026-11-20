@@ -9,9 +9,11 @@ AFK Motion Patcher is a non-destructive NDMF editor tool for retargeting a sourc
 
 If the VCC link does not open, add `https://vpm.k-neco.com/index.json` under **Settings > Packages > Add Repository**.
 
-Alternatively, import `AFK-Motion-Patcher-2.0.0-Installer.unitypackage` from BOOTH or GitHub Releases.
+Alternatively, import `AFK-Motion-Patcher-2.0.1.unitypackage` from BOOTH or GitHub Releases.
 
 ## Highlights
+
+- **Build-Time Humanoid Contact & Pose Tuning**: Contact-weighted 2-bone analytic arm IK baking (for face-touch and wide-sleeve clearance) and leg/knee posture adjustment written directly into standard Humanoid muscle curves with zero runtime overhead.
 
 - **Non-Destructive Action Merge (`PreserveExistingAction`)**: Keeps all existing Action Controller layers and parameters (GoGoLoco, dances, poses) intact, surgically removing only legacy `AFK == true` trigger branches before appending the retargeted AFK layer. Optional `ReplaceEntireAction` mode is also available.
 - **One-Click Smart Auto-Match**: Automatically matches non-humanoid bone chains (such as `Tail.001..007 ↔ Tail_1..7` and symmetric `Ear_L/R` hierarchies) and similar expression BlendShapes between source and target avatars.

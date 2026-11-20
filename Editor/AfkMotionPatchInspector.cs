@@ -19,6 +19,7 @@ namespace THE_cattail.AfkMotionPatcher
         private SerializedProperty _actionMergeMode;
         private SerializedProperty _stripAnimationEvents;
         private SerializedProperty _boneRotationOffsets;
+        private SerializedProperty _humanoidPoseAdjustment;
         private SerializedProperty _rendererPathRemaps;
         private SerializedProperty _blendShapeNameRemaps;
         private SerializedProperty _sourceKeyAdjustments;
@@ -34,6 +35,7 @@ namespace THE_cattail.AfkMotionPatcher
 
         private bool _showSourceSection;
         private bool _showTuningSection;
+        private bool _showHumanoidPoseTuning;
         private bool _showBoneOffsets;
         private bool _showBlendShapeMappings;
         private bool _showAdvancedSection;
@@ -54,6 +56,7 @@ namespace THE_cattail.AfkMotionPatcher
             _actionMergeMode = serializedObject.FindProperty(nameof(AfkMotionPatch.actionMergeMode));
             _stripAnimationEvents = serializedObject.FindProperty(nameof(AfkMotionPatch.stripAnimationEvents));
             _boneRotationOffsets = serializedObject.FindProperty(nameof(AfkMotionPatch.boneRotationOffsets));
+            _humanoidPoseAdjustment = serializedObject.FindProperty(nameof(AfkMotionPatch.humanoidPoseAdjustment));
             _rendererPathRemaps = serializedObject.FindProperty(nameof(AfkMotionPatch.rendererPathRemaps));
             _blendShapeNameRemaps = serializedObject.FindProperty(nameof(AfkMotionPatch.blendShapeNameRemaps));
             _sourceKeyAdjustments = serializedObject.FindProperty(nameof(AfkMotionPatch.sourceKeyAdjustments));
@@ -67,6 +70,7 @@ namespace THE_cattail.AfkMotionPatcher
 
             _showSourceSection = LoadFoldoutState("SourceSection", true);
             _showTuningSection = LoadFoldoutState("TuningSection", true);
+            _showHumanoidPoseTuning = LoadFoldoutState("HumanoidPoseTuning", true);
             _showBoneOffsets = LoadFoldoutState("BoneOffsets", true);
             _showBlendShapeMappings = LoadFoldoutState("BlendShapeMappings", false);
             _showAdvancedSection = LoadFoldoutState("AdvancedSection", false);
@@ -274,6 +278,9 @@ namespace THE_cattail.AfkMotionPatcher
                 }
 
                 EditorGUILayout.Space(2f);
+                DrawHumanoidPoseTuningSection();
+
+                EditorGUILayout.Space(2f);
                 _showBoneOffsets = DrawSubFoldout(
                     _showBoneOffsets,
                     F("Bone Pose Offsets ({0})", _boneRotationOffsets.arraySize),
@@ -297,6 +304,71 @@ namespace THE_cattail.AfkMotionPatcher
                 }
             }
             EditorGUILayout.EndFoldoutHeaderGroup();
+        }
+
+        private void DrawHumanoidPoseTuningSection()
+        {
+            if (_humanoidPoseAdjustment == null) return;
+            _showHumanoidPoseTuning = DrawSubFoldout(
+                _showHumanoidPoseTuning,
+                T("Humanoid Contact & Pose Tuning"),
+                "HumanoidPoseTuning",
+                _humanoidPoseAdjustment);
+            if (!_showHumanoidPoseTuning) return;
+
+            DrawGroupDescription(T("Bakes contact-weighted arm/hand clearance and leg posture into Humanoid curves. Standing start and end poses remain unchanged."));
+
+            var enabledProp = _humanoidPoseAdjustment.FindPropertyRelative("enabled");
+            var handOffsetProp = _humanoidPoseAdjustment.FindPropertyRelative("handOffsetInHeadSpace");
+            var fullDistProp = _humanoidPoseAdjustment.FindPropertyRelative("contactFullDistance");
+            var fadeDistProp = _humanoidPoseAdjustment.FindPropertyRelative("contactFadeDistance");
+            var elbowBiasProp = _humanoidPoseAdjustment.FindPropertyRelative("elbowOutwardBias");
+            var legCloseProp = _humanoidPoseAdjustment.FindPropertyRelative("legCloseAdjustment");
+            var kneeBendProp = _humanoidPoseAdjustment.FindPropertyRelative("kneeBendAdjustment");
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.PropertyField(enabledProp, new GUIContent(T("Enable Humanoid Pose Tuning")));
+                    if (GUILayout.Button(T("Reset"), EditorStyles.miniButton, GUILayout.Width(54f)))
+                    {
+                        handOffsetProp.vector3Value = Vector3.zero;
+                        fullDistProp.floatValue = 0.20f;
+                        fadeDistProp.floatValue = 0.30f;
+                        elbowBiasProp.floatValue = 0f;
+                        legCloseProp.floatValue = 0f;
+                        kneeBendProp.floatValue = 0f;
+                    }
+                }
+
+                using (new EditorGUI.DisabledScope(!enabledProp.boolValue))
+                {
+                    var offsetCm = handOffsetProp.vector3Value * 100f;
+                    var nextX = EditorGUILayout.Slider(new GUIContent(T("Hand Offset X (cm)")), offsetCm.x, -10f, 10f);
+                    var nextY = EditorGUILayout.Slider(new GUIContent(T("Hand Offset Y (cm)")), offsetCm.y, -10f, 10f);
+                    var nextZ = EditorGUILayout.Slider(new GUIContent(T("Hand Offset Z (cm)")), offsetCm.z, -10f, 10f);
+                    if (!Mathf.Approximately(nextX, offsetCm.x)
+                        || !Mathf.Approximately(nextY, offsetCm.y)
+                        || !Mathf.Approximately(nextZ, offsetCm.z))
+                    {
+                        handOffsetProp.vector3Value = new Vector3(nextX, nextY, nextZ) * 0.01f;
+                    }
+
+                    elbowBiasProp.floatValue = EditorGUILayout.Slider(
+                        new GUIContent(T("Elbow Outward Bias (cm)")), elbowBiasProp.floatValue * 100f, -10f, 10f) * 0.01f;
+                    legCloseProp.floatValue = EditorGUILayout.Slider(
+                        new GUIContent(T("Leg Close Adjustment")), legCloseProp.floatValue, -0.5f, 0.5f);
+                    kneeBendProp.floatValue = EditorGUILayout.Slider(
+                        new GUIContent(T("Knee Bend Adjustment")), kneeBendProp.floatValue, -0.5f, 0.5f);
+                    fullDistProp.floatValue = EditorGUILayout.Slider(
+                        new GUIContent(T("Contact Full Distance (m)")), fullDistProp.floatValue, 0.08f, 0.35f);
+                    fadeDistProp.floatValue = EditorGUILayout.Slider(
+                        new GUIContent(T("Contact Fade Distance (m)")),
+                        Mathf.Max(fadeDistProp.floatValue, fullDistProp.floatValue + 0.02f),
+                        fullDistProp.floatValue + 0.02f, 0.50f);
+                }
+            }
         }
 
         private void DrawAdvancedSection()

@@ -173,6 +173,82 @@ namespace THE_cattail.AfkMotionPatcher
                 patch,
                 binding => clip.GetFloatCurve(binding),
                 (binding, curve) => clip.SetFloatCurve(binding, curve));
+
+            AfkMotionHumanoidBaker.EnsureRootQuaternionContinuity(
+                binding => clip.GetFloatCurve(binding),
+                (binding, curve) => clip.SetFloatCurve(binding, curve),
+                clip.FrameRate);
+
+            AfkMotionHumanoidBaker.ApplyHumanoidPoseAdjustment(
+                avatarRoot,
+                patch,
+                clip.FrameRate,
+                binding => clip.GetFloatCurve(binding),
+                (binding, curve) => clip.SetFloatCurve(binding, curve));
+        }
+
+        public static int EnsureExitClipsResetBlendShapes(
+            IEnumerable<VirtualClip> allRetargetedClips, GameObject avatarRoot)
+        {
+            if (allRetargetedClips == null || !avatarRoot) return 0;
+            var clips = allRetargetedClips.Where(c => c != null).Distinct().ToList();
+            if (clips.Count == 0) return 0;
+
+            var animatedBlendShapes = new HashSet<EditorCurveBinding>();
+            var clipsWithBlendShapes = new HashSet<VirtualClip>();
+            foreach (var clip in clips)
+            {
+                var hasBs = false;
+                foreach (var binding in clip.GetFloatCurveBindings())
+                {
+                    if (binding.type == typeof(SkinnedMeshRenderer)
+                        && binding.propertyName.StartsWith("blendShape.", StringComparison.Ordinal))
+                    {
+                        animatedBlendShapes.Add(binding);
+                        hasBs = true;
+                    }
+                }
+                if (hasBs) clipsWithBlendShapes.Add(clip);
+            }
+
+            if (animatedBlendShapes.Count == 0) return 0;
+
+            var restWeights = new Dictionary<EditorCurveBinding, float>();
+            foreach (var binding in animatedBlendShapes)
+            {
+                if (TryGetRestBlendShapeWeight(avatarRoot, binding.path,
+                        binding.propertyName.Substring("blendShape.".Length), out var restWeight))
+                {
+                    restWeights[binding] = restWeight;
+                }
+            }
+            if (restWeights.Count == 0) return 0;
+
+            var injectedCount = 0;
+            foreach (var clip in clips)
+            {
+                if (clipsWithBlendShapes.Contains(clip)) continue;
+                foreach (var pair in restWeights)
+                {
+                    clip.SetFloatCurve(pair.Key, AnimationCurve.Constant(0f, 0f, pair.Value));
+                    injectedCount++;
+                }
+            }
+            return injectedCount;
+        }
+
+        private static bool TryGetRestBlendShapeWeight(
+            GameObject avatarRoot, string rendererPath, string shapeName, out float weight)
+        {
+            weight = 0f;
+            var t = string.IsNullOrEmpty(rendererPath) ? avatarRoot.transform : avatarRoot.transform.Find(rendererPath);
+            var smr = t ? t.GetComponent<SkinnedMeshRenderer>() : null;
+            var mesh = smr ? smr.sharedMesh : null;
+            if (!mesh) return false;
+            var idx = mesh.GetBlendShapeIndex(shapeName);
+            if (idx < 0) return false;
+            weight = smr.GetBlendShapeWeight(idx);
+            return true;
         }
 
         public static int EnableAnimationOnAffectedPhysBones(
@@ -291,6 +367,18 @@ namespace THE_cattail.AfkMotionPatcher
             ApplyBoneRotationOffsets(
                 avatarRoot,
                 patch,
+                binding => AnimationUtility.GetEditorCurve(composed, binding),
+                (binding, curve) => AnimationUtility.SetEditorCurve(composed, binding, curve));
+
+            AfkMotionHumanoidBaker.EnsureRootQuaternionContinuity(
+                binding => AnimationUtility.GetEditorCurve(composed, binding),
+                (binding, curve) => AnimationUtility.SetEditorCurve(composed, binding, curve),
+                composed.frameRate);
+
+            AfkMotionHumanoidBaker.ApplyHumanoidPoseAdjustment(
+                avatarRoot,
+                patch,
+                composed.frameRate,
                 binding => AnimationUtility.GetEditorCurve(composed, binding),
                 (binding, curve) => AnimationUtility.SetEditorCurve(composed, binding, curve));
 

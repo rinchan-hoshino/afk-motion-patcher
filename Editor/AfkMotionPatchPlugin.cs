@@ -175,6 +175,9 @@ namespace THE_cattail.AfkMotionPatcher
             var enabledPhysBoneCount = AfkMotionPatchEditorUtil.EnableAnimationOnAffectedPhysBones(
                 avatarRoot, animatedTransformPaths);
 
+            var resetBlendShapeCurveCount = AfkMotionPatchEditorUtil.EnsureExitClipsResetBlendShapes(
+                retargetedMotions.OfType<VirtualClip>(), avatarRoot);
+
             if (!controllerContext.Controllers.TryGetValue(
                     VRCAvatarDescriptor.AnimLayerType.Action, out var actionSlot) || actionSlot == null)
             {
@@ -238,7 +241,8 @@ namespace THE_cattail.AfkMotionPatcher
                 + $"totalLayers={actionSlot.Layers.Count()}, appendedLayers={keptLayers.Count}, "
                 + $"strippedOldAfkTransitions={strippedExistingAfkTransitions}, states={selectedStateCount}, "
                 + $"clips={retargetedClipCount}, copiedSourceCurves={copiedSourceCurves}, "
-                + $"appendedMappedCurves={appendedMappedCurves}, enabledPhysBones={enabledPhysBoneCount}", patch);
+                + $"appendedMappedCurves={appendedMappedCurves}, enabledPhysBones={enabledPhysBoneCount}, "
+                + $"resetBlendShapeCurves={resetBlendShapeCurveCount}", patch);
         }
 
         private static string EnsureUniqueLayerName(string baseName, HashSet<string> usedNames)

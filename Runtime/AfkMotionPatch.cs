@@ -40,6 +40,31 @@ namespace THE_cattail.AfkMotionPatcher
         }
 
         [Serializable]
+        public sealed class HumanoidPoseAdjustment
+        {
+            [Tooltip("Enable build-time & preview-time Humanoid pose adjustment baked directly into Humanoid muscle curves (zero runtime overhead).")]
+            public bool enabled;
+
+            [Tooltip("Contact-weighted hand position offset in Head-local space (meters: +X right cheek outward, +Y up, +Z forward away from face). Automatically 0 while standing and 1 when hands are near head.")]
+            public Vector3 handOffsetInHeadSpace;
+
+            [Tooltip("Hand-to-head distance (meters) below which the contact weight reaches 1.0.")]
+            public float contactFullDistance = 0.20f;
+
+            [Tooltip("Hand-to-head distance (meters) above which the contact weight smoothly fades to 0.0, keeping start/end standing poses untouched.")]
+            public float contactFadeDistance = 0.30f;
+
+            [Tooltip("Optional outward elbow pole bias (meters) when solving 2-bone arm IK.")]
+            public float elbowOutwardBias;
+
+            [Tooltip("Contact-weighted Upper Leg In-Out muscle adjustment (negative brings knees closer together).")]
+            public float legCloseAdjustment;
+
+            [Tooltip("Contact-weighted Lower Leg Stretch muscle adjustment (negative bends knees tighter).")]
+            public float kneeBendAdjustment;
+        }
+
+        [Serializable]
         public sealed class RendererPathRemap
         {
             public string fromPath = "Body";
@@ -109,6 +134,9 @@ namespace THE_cattail.AfkMotionPatcher
 
         [Tooltip("Intuitive Pitch / Yaw / Roll degree offsets applied to target bones.")]
         public List<BoneRotationOffset> boneRotationOffsets = new List<BoneRotationOffset>();
+
+        [Tooltip("Optional build-time Humanoid contact & pose tuning (2-bone arm IK sleeve clearance and leg posture, automatically faded to 0 when standing).")]
+        public HumanoidPoseAdjustment humanoidPoseAdjustment = new HumanoidPoseAdjustment();
 
         public List<RendererPathRemap> rendererPathRemaps = new List<RendererPathRemap>();
         public List<BlendShapeNameRemap> blendShapeNameRemaps = new List<BlendShapeNameRemap>();

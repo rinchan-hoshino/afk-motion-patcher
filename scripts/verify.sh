@@ -8,7 +8,7 @@ import json, sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     data = json.load(f)
 assert data["name"] == "com.the-cattail.afk-motion-patcher"
-assert data["version"] == "2.0.0"
+assert data["version"] == "2.0.1"
 assert "k-neco-lab" not in json.dumps(data)
 print(f"[verify] package.json OK: {data['name']}@{data['version']}")
 PY

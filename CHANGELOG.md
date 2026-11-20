@@ -2,6 +2,16 @@
 
 All notable changes to **AFK Motion Patcher** are documented in this file.
 
+## [2.0.1] - 2026-11-20
+
+### Added
+- **Build-Time Humanoid Contact & Pose Tuning (`HumanoidPoseAdjustment`)**: Contact-weighted (`w = 0` while standing, `w = 1` near head) 2-bone analytic arm IK baking and leg/knee posture adjustment written directly into standard Humanoid muscle curves with zero runtime overhead, exposed in the Inspector with 5-language UI and live preview sync.
+- **Root Quaternion Continuity & Hemisphere Normalization**: Automatically repairs opposite-hemisphere `RootQ` discontinuities (`Dot(prev, curr) < 0`) and normalizes single-hemisphere clips to `w >= 0` while preserving genuine continuous rotations and all `AnimationClipSettings`.
+- **Clean Exit BlendShape Restoration**: Automatically injects rest-pose reset curves on exit/neutral AFK clips (such as `BlendOut AFK` / `Restore Tracking AFK`) so exiting AFK never leaves residual closed-eye or expression BlendShapes.
+
+### Fixed
+- **Preview SkinnedMeshRenderer Refresh**: Enabled `forceMatrixRecalculationPerRender` and `updateWhenOffscreen` on `AfkMotionPreviewWindow` preview instances to guarantee reliable multi-frame EditMode skinning updates.
+
 ## [2.0.0] - 2026-11-20
 
 ### Added
