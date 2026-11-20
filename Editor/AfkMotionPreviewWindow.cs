@@ -521,6 +521,8 @@ namespace THE_cattail.AfkMotionPatcher
         {
             private enum ViewTool { None, Pan, Zoom, Orbit }
 
+            private static readonly Vector2 DefaultOrbit = new Vector2(48f, -24f);
+
             private readonly string _label;
             private PreviewRenderUtility _preview;
             private GameObject _sourceRoot;
@@ -534,9 +536,11 @@ namespace THE_cattail.AfkMotionPatcher
             private AnimatorStateMachine _sampleStateMachine;
             private readonly List<AnimatorState> _sampleStates = new List<AnimatorState>();
             private readonly Dictionary<AnimationClip, int> _stateHashes = new Dictionary<AnimationClip, int>();
-            private Vector2 _orbit;
-            private Vector3 _focus;
-            private float _distance = 2.2f;
+            private Vector2 _orbit = DefaultOrbit;
+            private Vector3 _fitFocus;
+            private Vector3 _panOffset;
+            private float _fitDistance = 2.0f;
+            private float _zoomScale = 1f;
             private float _minimumDistance = 0.2f;
             private bool _needsFit = true;
             private bool _hasCameraView;
@@ -550,11 +554,19 @@ namespace THE_cattail.AfkMotionPatcher
                 _preview.camera.backgroundColor = new Color(49f / 255f, 49f / 255f, 49f / 255f, 1f);
                 _preview.camera.nearClipPlane = 0.01f;
                 _preview.camera.farClipPlane = 100f;
-                _preview.camera.fieldOfView = 25f;
+                _preview.camera.fieldOfView = 30f;
+                _preview.ambientColor = new Color(0.32f, 0.32f, 0.35f, 1f);
                 if (_preview.lights != null && _preview.lights.Length > 0)
                 {
-                    _preview.lights[0].intensity = 1.2f;
-                    _preview.lights[0].transform.rotation = Quaternion.Euler(45f, -30f, 0f);
+                    _preview.lights[0].intensity = 1.15f;
+                    _preview.lights[0].color = new Color(1f, 0.98f, 0.96f, 1f);
+                    _preview.lights[0].transform.rotation = Quaternion.Euler(30f, -25f, 0f);
+                }
+                if (_preview.lights != null && _preview.lights.Length > 1)
+                {
+                    _preview.lights[1].intensity = 0.55f;
+                    _preview.lights[1].color = new Color(0.92f, 0.95f, 1f, 1f);
+                    _preview.lights[1].transform.rotation = Quaternion.Euler(15f, 150f, 0f);
                 }
             }
 
@@ -606,8 +618,10 @@ namespace THE_cattail.AfkMotionPatcher
             {
                 SetContent(root, _processAvatar, clip);
                 GUI.Box(rect, GUIContent.none);
-                var title = new Rect(rect.x + 4f, rect.y + 2f, rect.width - 8f, PaneToolbarHeight);
-                GUI.Label(title, T(_label), EditorStyles.whiteMiniLabel);
+                var title = new Rect(rect.x + 6f, rect.y + 2f, rect.width - 12f, PaneToolbarHeight);
+                var cleanName = FormatCleanAvatarName(_sourceRoot);
+                var headerText = string.IsNullOrEmpty(cleanName) ? T(_label) : $"{T(_label)}: {cleanName}";
+                GUI.Label(title, headerText, EditorStyles.whiteMiniLabel);
 
                 var previewRect = new Rect(rect.x, rect.y + PaneToolbarHeight, rect.width, rect.height - PaneToolbarHeight);
                 if (interactive) HandleDrag(previewRect);
@@ -660,17 +674,31 @@ namespace THE_cattail.AfkMotionPatcher
             {
                 _needsFit = true;
                 _hasCameraView = false;
+                _orbit = DefaultOrbit;
+                _panOffset = Vector3.zero;
+                _zoomScale = 1f;
             }
 
             public void CopyCameraFrom(PreviewPane other)
             {
                 if (other == null || other == this || !other._hasCameraView) return;
                 _orbit = other._orbit;
-                _focus = other._focus;
-                _distance = other._distance;
-                _minimumDistance = other._minimumDistance;
-                _needsFit = false;
+                _panOffset = other._panOffset;
+                _zoomScale = other._zoomScale;
                 _hasCameraView = true;
+            }
+
+            private static string FormatCleanAvatarName(GameObject root)
+            {
+                if (!root) return string.Empty;
+                var name = root.name ?? string.Empty;
+                const string previewPrefix = "AfkMotionPatchPreview_";
+                if (name.StartsWith(previewPrefix, StringComparison.Ordinal))
+                    name = name.Substring(previewPrefix.Length);
+                name = name.Replace(" (AFK Preview)", string.Empty)
+                    .Replace("(Clone)", string.Empty)
+                    .Trim();
+                return name;
             }
 
             private void Render(Rect rect)
@@ -765,9 +793,10 @@ namespace THE_cattail.AfkMotionPatcher
             private void PanCamera(Event evt)
             {
                 var camera = _preview.camera;
-                var screenPosition = camera.WorldToScreenPoint(_focus);
+                var focus = _fitFocus + _panOffset;
+                var screenPosition = camera.WorldToScreenPoint(focus);
                 screenPosition += new Vector3(-evt.delta.x, evt.delta.y, 0f);
-                _focus += camera.ScreenToWorldPoint(screenPosition) - _focus;
+                _panOffset += camera.ScreenToWorldPoint(screenPosition) - focus;
                 _hasCameraView = true;
                 evt.Use();
             }
@@ -783,8 +812,9 @@ namespace THE_cattail.AfkMotionPatcher
             private void ZoomCamera(Event evt, float delta)
             {
                 var zoomDelta = -delta * 0.05f;
-                _distance += _distance * zoomDelta;
-                _distance = Mathf.Clamp(_distance, _minimumDistance, 20f);
+                var currentDistance = Mathf.Clamp(_fitDistance * _zoomScale, _minimumDistance, 20f);
+                var nextDistance = Mathf.Clamp(currentDistance + currentDistance * zoomDelta, _minimumDistance, 20f);
+                _zoomScale = _fitDistance > 0.0001f ? nextDistance / _fitDistance : 1f;
                 _hasCameraView = true;
                 evt.Use();
             }
@@ -793,30 +823,139 @@ namespace THE_cattail.AfkMotionPatcher
             {
                 _needsFit = false;
                 var bounds = CalculateBounds(_instance);
-                var size = Mathf.Max(bounds.size.x, bounds.size.y, bounds.size.z, 0.2f);
-                _focus = bounds.center;
-                _distance = Mathf.Clamp(size * 2.6f, 0.5f, 15f);
-                _minimumDistance = Mathf.Max(_distance / 10f, 0.05f);
-                _orbit = Vector2.zero;
-                _hasCameraView = true;
+                var height = Mathf.Max(bounds.size.y, 0.25f);
+                var width = Mathf.Max(bounds.size.x, 0.25f);
+                var tanHalfFov = Mathf.Tan(_preview.camera.fieldOfView * 0.5f * Mathf.Deg2Rad);
+                var distForHeight = (height * 0.5f) / (tanHalfFov * 0.72f);
+                var distForWidth = (width * 0.5f) / (tanHalfFov * 0.80f);
+                _fitFocus = bounds.center;
+                _fitDistance = Mathf.Clamp(Mathf.Max(distForHeight, distForWidth), 0.45f, 12f);
+                _minimumDistance = Mathf.Max(_fitDistance / 10f, 0.05f);
+                if (!_hasCameraView)
+                {
+                    _orbit = DefaultOrbit;
+                    _panOffset = Vector3.zero;
+                    _zoomScale = 1f;
+                    _hasCameraView = true;
+                }
             }
 
             private void UpdateCamera()
             {
+                var focus = _fitFocus + _panOffset;
+                var distance = Mathf.Clamp(_fitDistance * _zoomScale, _minimumDistance, 20f);
                 var rotation = Quaternion.Euler(_orbit.y * 0.25f, _orbit.x * 0.25f, 0f);
                 var direction = rotation * new Vector3(0f, 0f, -1f);
-                _preview.camera.transform.position = _focus - direction * _distance;
+                _preview.camera.transform.position = focus - direction * distance;
                 _preview.camera.transform.rotation = Quaternion.LookRotation(direction, Vector3.up);
             }
 
             private static Bounds CalculateBounds(GameObject root)
             {
                 if (!root) return new Bounds(Vector3.zero, Vector3.one);
-                var renderers = root.GetComponentsInChildren<Renderer>(true).Where(r => r.enabled).ToArray();
-                if (renderers.Length == 0) return new Bounds(root.transform.position + Vector3.up, Vector3.one);
-                var bounds = renderers[0].bounds;
-                for (var i = 1; i < renderers.Length; i++) bounds.Encapsulate(renderers[i].bounds);
-                return bounds;
+
+                var animator = root.GetComponent<Animator>();
+                Transform anchorTransform = null;
+                if (animator && animator.isHuman)
+                    anchorTransform = animator.GetBoneTransform(HumanBodyBones.Hips);
+                var anchorPos = anchorTransform ? anchorTransform.position : root.transform.position + Vector3.up * 0.8f;
+
+                var hasBounds = false;
+                var bounds = new Bounds(anchorPos, Vector3.zero);
+
+                var tempMesh = new Mesh { hideFlags = HideFlags.HideAndDontSave };
+                try
+                {
+                    var skinnedRenderers = root.GetComponentsInChildren<SkinnedMeshRenderer>(false);
+                    foreach (var smr in skinnedRenderers)
+                    {
+                        if (!smr || !smr.enabled || !smr.gameObject.activeInHierarchy || !smr.sharedMesh) continue;
+                        tempMesh.Clear();
+                        smr.BakeMesh(tempMesh, true);
+                        var verts = tempMesh.vertices;
+                        if (verts == null || verts.Length == 0) continue;
+
+                        var pos = smr.transform.position;
+                        var rot = smr.transform.rotation;
+                        var step = verts.Length > 4096 ? verts.Length / 2048 : 1;
+                        for (var i = 0; i < verts.Length; i += step)
+                        {
+                            var worldPos = pos + rot * verts[i];
+                            if ((worldPos - anchorPos).sqrMagnitude > 6.25f) continue;
+                            if (!hasBounds)
+                            {
+                                bounds = new Bounds(worldPos, Vector3.zero);
+                                hasBounds = true;
+                            }
+                            else
+                            {
+                                bounds.Encapsulate(worldPos);
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    UnityEngine.Object.DestroyImmediate(tempMesh);
+                }
+
+                var meshRenderers = root.GetComponentsInChildren<MeshRenderer>(false);
+                foreach (var mr in meshRenderers)
+                {
+                    if (!mr || !mr.enabled || !mr.gameObject.activeInHierarchy) continue;
+                    var b = mr.bounds;
+                    if (b.size.sqrMagnitude <= 0.00001f || b.size.magnitude > 2.5f) continue;
+                    if ((b.center - anchorPos).sqrMagnitude > 4.0f) continue;
+                    if (!hasBounds)
+                    {
+                        bounds = b;
+                        hasBounds = true;
+                    }
+                    else
+                    {
+                        bounds.Encapsulate(b);
+                    }
+                }
+
+                if (hasBounds && bounds.size.y > 0.1f) return bounds;
+
+                if (animator && animator.isHuman)
+                {
+                    var boneHasBounds = false;
+                    var boneBounds = new Bounds(anchorPos, Vector3.zero);
+                    var sampleBones = new[]
+                    {
+                        HumanBodyBones.Hips, HumanBodyBones.Spine, HumanBodyBones.Chest,
+                        HumanBodyBones.Head, HumanBodyBones.LeftHand, HumanBodyBones.RightHand,
+                        HumanBodyBones.LeftFoot, HumanBodyBones.RightFoot,
+                        HumanBodyBones.LeftToes, HumanBodyBones.RightToes
+                    };
+                    foreach (var bone in sampleBones)
+                    {
+                        var t = animator.GetBoneTransform(bone);
+                        if (!t) continue;
+                        if (!boneHasBounds)
+                        {
+                            boneBounds = new Bounds(t.position, Vector3.zero);
+                            boneHasBounds = true;
+                        }
+                        else
+                        {
+                            boneBounds.Encapsulate(t.position);
+                        }
+                    }
+                    if (boneHasBounds)
+                    {
+                        boneBounds.Expand(0.28f);
+                        return boneBounds;
+                    }
+                }
+
+                var renderers = root.GetComponentsInChildren<Renderer>(false).Where(r => r.enabled).ToArray();
+                if (renderers.Length == 0) return new Bounds(root.transform.position + Vector3.up * 0.8f, Vector3.one);
+                var fallback = renderers[0].bounds;
+                for (var i = 1; i < renderers.Length; i++) fallback.Encapsulate(renderers[i].bounds);
+                return fallback;
             }
 
             private void RebuildResetClip(IReadOnlyList<AnimationClip> clips)
